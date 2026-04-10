@@ -1,6 +1,11 @@
 import cors from "cors";
 import express from "express";
 import { db } from "./db.js";
+import path from "path";
+import { fileURLToPath } from "node:url";
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
 import {
   BASELINE_END,
   BASELINE_START,
@@ -101,6 +106,12 @@ app.get("/api/projects/:siteNo/trend", (req, res) => {
 });
 
 const port = Number(process.env.PORT ?? 8787);
+
+app.use(express.static(path.join(process.cwd(), "dist")));
+
+app.get("/{*splat}", (req, res) => {
+  res.sendFile(path.join(process.cwd(), "dist/index.html"));
+});
 
 app.listen(port, () => {
   console.log(`Pricing monitor API listening on http://localhost:${port}`);
