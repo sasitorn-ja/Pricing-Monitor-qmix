@@ -3,5 +3,12 @@ import type { ApiRequest, ApiResponse } from "../../_shared.js";
 import { readQueryValue, sendJson } from "../../_shared.js";
 
 export default function handler(req: ApiRequest, res: ApiResponse) {
-  return sendJson(res, getProjectTrend(readQueryValue(req.params, "siteNo")));
+  const siteNo =
+    readQueryValue(req.query, "siteNo") || readQueryValue(req.params, "siteNo");
+
+  if (!siteNo) {
+    return sendJson(res, { error: "Missing siteNo" }, 400);
+  }
+
+  return sendJson(res, getProjectTrend(siteNo));
 }

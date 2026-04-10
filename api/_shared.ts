@@ -1,6 +1,6 @@
 export type ApiRequest = {
-  query: Record<string, string | string[] | undefined>;
-  params: Record<string, string | string[] | undefined>;
+  query?: Record<string, string | string[] | undefined>;
+  params?: Record<string, string | string[] | undefined>;
 };
 
 export type ApiResponse = {
@@ -13,9 +13,13 @@ export function sendJson(res: ApiResponse, body: unknown, statusCode = 200) {
 }
 
 export function readQueryValue(
-  source: Record<string, string | string[] | undefined>,
+  source: Record<string, string | string[] | undefined> | undefined,
   key: string
 ) {
+  if (!source) {
+    return "";
+  }
+
   const value = source[key];
 
   if (Array.isArray(value)) {
