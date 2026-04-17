@@ -1,8 +1,9 @@
-import { useEffect, useMemo, useState } from "react";
+import { type Dispatch, type SetStateAction, useEffect, useMemo, useState } from "react";
 import {
   Bar,
   BarChart,
   CartesianGrid,
+  LabelList,
   Legend,
   Line,
   LineChart,
@@ -25,15 +26,22 @@ type MetaResponse = {
     campaignStart: string;
     targetIncrease: number;
   };
+  filters?: {
+    divisions: string[];
+    segments: string[];
+  };
 };
 
 type SummaryResponse = {
   comparableSites: number;
+  ladder500: number;
+  ladder400: number;
   ladder300: number;
   ladder200: number;
   ladder100: number;
   ladder0: number;
   belowTargetSites: number;
+  totalIncrease: number;
   avgIncrease: number;
   avgTargetPercent: number;
   minIncrease: number;
@@ -43,12 +51,29 @@ type SummaryResponse = {
 type TrendPoint = {
   day: string;
   siteCount: number;
+  ladder500: number;
+  ladder400: number;
   ladder300: number;
   ladder200: number;
   ladder100: number;
   ladder0: number;
   avgIncrease: number;
   avgTargetPercent: number;
+  moveInto500: number;
+  moveInto400: number;
+  moveInto300: number;
+  moveInto200: number;
+  moveInto100: number;
+  moveInto0: number;
+};
+
+type ShareTrendPoint = TrendPoint & {
+  ladder500Share: number;
+  ladder400Share: number;
+  ladder300Share: number;
+  ladder200Share: number;
+  ladder100Share: number;
+  ladder0Share: number;
 };
 
 type ProjectRow = {
@@ -82,31 +107,76 @@ type ProjectTrendPoint = {
 
 type ProjectResponse = {
   rows: ProjectRow[];
-  leaderboard: ProjectRow[];
+  total: number;
 };
 
+type TrendRange = "all" | "post25" | "last14" | "last7";
+
 const bucketLabels = [
-  { key: "300+", label: "300 บาทขึ้นไป", tone: "bg-emerald-400" },
+  { key: "500+", label: "500 บาทขึ้นไป", tone: "bg-green-600" },
+  { key: "400-499", label: "400-499 บาท", tone: "bg-green-500" },
+  { key: "300-399", label: "300-399 บาท", tone: "bg-emerald-400" },
   { key: "200-299", label: "200-299 บาท", tone: "bg-sky-400" },
   { key: "100-199", label: "100-199 บาท", tone: "bg-amber-400" },
   { key: "0-99", label: "ต่ำกว่า 100 บาท", tone: "bg-rose-400" }
 ] as const;
 
+const bucketColors = {
+  topMax: "#16a34a",
+  topHigh: "#22c55e",
+  top: "#34d399",
+  high: "#38bdf8",
+  mid: "#fbbf24",
+  low: "#fb7185"
+} as const;
+
+const trendBucketSeries = [
+  { shareKey: "ladder0Share", countKey: "ladder0", name: "0-99", fill: bucketColors.low },
+  { shareKey: "ladder100Share", countKey: "ladder100", name: "100-199", fill: bucketColors.mid },
+  { shareKey: "ladder200Share", countKey: "ladder200", name: "200-299", fill: bucketColors.high },
+  { shareKey: "ladder300Share", countKey: "ladder300", name: "300-399", fill: bucketColors.top },
+  { shareKey: "ladder400Share", countKey: "ladder400", name: "400-499", fill: bucketColors.topHigh },
+  { shareKey: "ladder500Share", countKey: "ladder500", name: "500+", fill: bucketColors.topMax }
+] as const;
+
 const PAGE_SIZE = 20;
+const SEARCH_DEBOUNCE_MS = 250;
+const API_TIMEOUT_MS = 20_000;
 const tableColumnHelp = {
   ladder: "ระดับการขึ้นราคาเทียบเป้า 300 บาท",
-  baseline: "net price เฉลี่ยถ่วงน้ำหนักช่วงวันที่ 1-24",
+  baseline: "ค่าเฉลี่ย NP_AVG ตรง ๆ ช่วงวันที่ 1-24",
   current: "net price ล่าสุดหลังวันที่ 25",
-  increase: "Current - Baseline จึงอาจติดลบได้",
+  increase: "Current - Baseline และถ้าติดลบจะนับเป็น 0 บาท",
   target: "(Increase / 300) x 100",
   latestDay: "วันที่ใช้เป็นราคาล่าสุดของโครงการ"
 } as const;
 
 async function fetchJson<T>(url: string): Promise<T> {
-  const response = await fetch(url);
+  let response: Response;
+
+  try {
+    response = await fetch(url, {
+      signal: AbortSignal.timeout(API_TIMEOUT_MS)
+    });
+  } catch (error) {
+    if (error instanceof Error && error.name === "TimeoutError") {
+      throw new Error(`Request timed out after ${API_TIMEOUT_MS / 1000} seconds`);
+    }
+
+    throw error;
+  }
 
   if (!response.ok) {
-    throw new Error(`Request failed: ${response.status}`);
+    let message = `Request failed: ${response.status}`;
+
+    try {
+      const errorBody = (await response.json()) as { error?: string };
+      message = errorBody.error || message;
+    } catch {
+      // Ignore JSON parse errors and keep the HTTP status message.
+    }
+
+    throw new Error(message);
   }
 
   return response.json() as Promise<T>;
@@ -122,11 +192,60 @@ function formatPercent(value: number) {
   return `${formatNumber(value)}%`;
 }
 
+function formatPercentTick(value: number) {
+  return `${Math.round(value)}%`;
+}
+
+function formatBaht(value: number) {
+  return `${formatNumber(value)} บาท`;
+}
+
 function formatShortDate(value: string) {
   return new Date(value).toLocaleDateString("th-TH", {
     month: "short",
     day: "numeric"
   });
+}
+
+function formatThaiDate(value: string) {
+  return new Date(value).toLocaleDateString("th-TH", {
+    year: "numeric",
+    month: "short",
+    day: "numeric"
+  });
+}
+
+function formatThaiDateShort(value: string) {
+  return new Date(value).toLocaleDateString("th-TH", {
+    month: "short",
+    day: "numeric"
+  });
+}
+
+function renderPercentBarLabel(props: any) {
+  const x = Number(props.x ?? 0);
+  const y = Number(props.y ?? 0);
+  const width = Number(props.width ?? 0);
+  const height = Number(props.height ?? 0);
+  const value = Number(props.value ?? 0);
+
+  if (!value || value < 9 || height < 24 || width < 18) {
+    return null;
+  }
+
+  return (
+    <text
+      x={x + width / 2}
+      y={y + height / 2}
+      fill="#f8fbff"
+      fontSize={12}
+      fontWeight={700}
+      textAnchor="middle"
+      dominantBaseline="middle"
+    >
+      {formatPercentTick(value)}
+    </text>
+  );
 }
 
 function HeaderWithHint({
@@ -169,79 +288,137 @@ export function App() {
   const [summary, setSummary] = useState<SummaryResponse | null>(null);
   const [trend, setTrend] = useState<TrendPoint[]>([]);
   const [projectRows, setProjectRows] = useState<ProjectRow[]>([]);
-  const [leaderboard, setLeaderboard] = useState<ProjectRow[]>([]);
+  const [projectTotal, setProjectTotal] = useState(0);
   const [selectedBucket, setSelectedBucket] = useState("");
+  const [selectedDay, setSelectedDay] = useState("");
   const [search, setSearch] = useState("");
-  const [onlyBelowTarget, setOnlyBelowTarget] = useState(true);
+  const [selectedDivisions, setSelectedDivisions] = useState<string[]>([]);
+  const [selectedSegments, setSelectedSegments] = useState<string[]>([]);
   const [selectedSite, setSelectedSite] = useState<string>("");
   const [selectedTrend, setSelectedTrend] = useState<ProjectTrendPoint[]>([]);
+  const [trendRange, setTrendRange] = useState<TrendRange>("all");
   const [currentPage, setCurrentPage] = useState(1);
+  const [debouncedSearch, setDebouncedSearch] = useState("");
+  const [hasLoadedSummary, setHasLoadedSummary] = useState(false);
+  const [hasLoadedProjects, setHasLoadedProjects] = useState(false);
   const [activeHint, setActiveHint] = useState<keyof typeof tableColumnHelp | null>(
     null
   );
-  const [loading, setLoading] = useState(true);
+  const [metaLoading, setMetaLoading] = useState(true);
   const [error, setError] = useState("");
 
-  useEffect(() => {
-    async function loadDashboard() {
-      try {
-        setLoading(true);
-        const [metaResponse, summaryResponse, trendResponse, projectResponse] =
-          await Promise.all([
-            fetchJson<MetaResponse>("/api/meta"),
-            fetchJson<SummaryResponse>("/api/summary"),
-            fetchJson<TrendPoint[]>("/api/trend"),
-            fetchJson<ProjectResponse>("/api/projects?onlyBelowTarget=true")
-          ]);
+  const buildFilterQuery = () => {
+    const params = new URLSearchParams();
 
+    if (selectedDivisions.length > 0) {
+      params.set("divisions", selectedDivisions.join(","));
+    }
+
+    if (selectedSegments.length > 0) {
+      params.set("segments", selectedSegments.join(","));
+    }
+
+    return params;
+  };
+
+  const toggleValue = (
+    value: string,
+    setter: Dispatch<SetStateAction<string[]>>
+  ) => {
+    setter((items) =>
+      items.includes(value) ? items.filter((item) => item !== value) : [...items, value]
+    );
+  };
+
+  useEffect(() => {
+    const timeoutId = window.setTimeout(() => {
+      setDebouncedSearch(search.trim());
+    }, SEARCH_DEBOUNCE_MS);
+
+    return () => window.clearTimeout(timeoutId);
+  }, [search]);
+
+  useEffect(() => {
+    async function loadMeta() {
+      try {
+        setMetaLoading(true);
+        setError("");
+        const metaResponse = await fetchJson<MetaResponse>("/api/meta");
         setMeta(metaResponse);
-        setSummary(summaryResponse);
-        setTrend(trendResponse);
-        setProjectRows(projectResponse.rows);
-        setLeaderboard(projectResponse.leaderboard);
-        setSelectedSite(projectResponse.leaderboard[0]?.siteNo ?? "");
       } catch (requestError) {
         setError(
           requestError instanceof Error ? requestError.message : "Unknown error"
         );
       } finally {
-        setLoading(false);
+        setMetaLoading(false);
       }
     }
 
-    void loadDashboard();
+    void loadMeta();
   }, []);
+
+  useEffect(() => {
+    async function loadFilteredDashboard() {
+      try {
+        setError("");
+        const params = buildFilterQuery();
+        const query = params.toString();
+        const suffix = query ? `?${query}` : "";
+
+        const [summaryResponse, trendResponse] = await Promise.all([
+          fetchJson<SummaryResponse>(`/api/summary${suffix}`),
+          fetchJson<TrendPoint[]>(`/api/trend${suffix}`)
+        ]);
+
+        setSummary(summaryResponse);
+        setTrend(trendResponse);
+        setHasLoadedSummary(true);
+      } catch (requestError) {
+        setError(
+          requestError instanceof Error ? requestError.message : "Unknown error"
+        );
+      }
+    }
+
+    void loadFilteredDashboard();
+  }, [selectedDivisions, selectedSegments]);
 
   useEffect(() => {
     async function loadProjects() {
       try {
-        const params = new URLSearchParams();
+        setError("");
+        const params = buildFilterQuery();
 
         if (selectedBucket) {
           params.set("ladder", selectedBucket);
         }
 
-        if (search.trim()) {
-          params.set("search", search.trim());
+        if (selectedDay) {
+          params.set("day", selectedDay);
         }
 
-        if (onlyBelowTarget) {
-          params.set("onlyBelowTarget", "true");
+        if (debouncedSearch) {
+          params.set("search", debouncedSearch);
         }
 
+        params.set("page", String(currentPage));
+        params.set("pageSize", String(PAGE_SIZE));
+
+        const query = params.toString();
         const projectResponse = await fetchJson<ProjectResponse>(
-          `/api/projects?${params.toString()}`
+          `/api/projects${query ? `?${query}` : ""}`
         );
 
         setProjectRows(projectResponse.rows);
-        setLeaderboard(projectResponse.leaderboard);
+        setProjectTotal(projectResponse.total);
+        setHasLoadedProjects(true);
 
         const stillExists = projectResponse.rows.some(
           (row) => row.siteNo === selectedSite
         );
 
         if (!stillExists) {
-          setSelectedSite(projectResponse.leaderboard[0]?.siteNo ?? "");
+          setSelectedSite(projectResponse.rows[0]?.siteNo ?? "");
         }
       } catch (requestError) {
         setError(
@@ -251,11 +428,18 @@ export function App() {
     }
 
     void loadProjects();
-  }, [search, selectedBucket, onlyBelowTarget]);
+  }, [
+    currentPage,
+    debouncedSearch,
+    selectedBucket,
+    selectedDay,
+    selectedDivisions,
+    selectedSegments
+  ]);
 
   useEffect(() => {
     setCurrentPage(1);
-  }, [search, selectedBucket, onlyBelowTarget]);
+  }, [search, selectedBucket, selectedDay, selectedDivisions, selectedSegments]);
 
   useEffect(() => {
     async function loadSelectedTrend() {
@@ -265,8 +449,10 @@ export function App() {
       }
 
       try {
+        const params = buildFilterQuery();
+        const query = params.toString();
         const projectTrend = await fetchJson<ProjectTrendPoint[]>(
-          `/api/project-trend?siteNo=${encodeURIComponent(selectedSite)}`
+          `/api/projects/${encodeURIComponent(selectedSite)}/trend${query ? `?${query}` : ""}`
         );
 
         setSelectedTrend(projectTrend);
@@ -278,58 +464,64 @@ export function App() {
     }
 
     void loadSelectedTrend();
-  }, [selectedSite]);
+  }, [selectedSite, selectedDivisions, selectedSegments]);
 
-  const ladderCards = useMemo(() => {
-    if (!summary) {
-      return [];
+  const post25TrendData = useMemo(() => {
+    if (!meta) {
+      return trend;
     }
 
-    return [
-      {
-        key: "300+",
-        title: "ถึงเป้า 300+",
-        value: summary.ladder300
-      },
-      {
-        key: "200-299",
-        title: "ใกล้ถึงเป้า 200-299",
-        value: summary.ladder200
-      },
-      {
-        key: "100-199",
-        title: "กลางทาง 100-199",
-        value: summary.ladder100
-      },
-      {
-        key: "0-99",
-        title: "ยังต่ำกว่า 100",
-        value: summary.ladder0
-      }
-    ];
-  }, [summary]);
+    return trend.filter((point) => point.day >= meta.config.campaignStart);
+  }, [meta, trend]);
 
-  const leaderboardChartData = useMemo(() => {
-    return leaderboard.map((row) => ({
-      name:
-        row.siteName.length > 24 ? `${row.siteName.slice(0, 24)}...` : row.siteName,
-      increaseAmount: row.increaseAmount,
-      targetPercent: row.targetPercent,
-      siteNo: row.siteNo
-    }));
-  }, [leaderboard]);
+  const proportionTrendData = useMemo<ShareTrendPoint[]>(() => {
+    return post25TrendData.map((point) => {
+      const denominator = point.siteCount || 1;
 
-  const totalPages = Math.max(1, Math.ceil(projectRows.length / PAGE_SIZE));
+      return {
+        ...point,
+        ladder500Share: (point.ladder500 / denominator) * 100,
+        ladder400Share: (point.ladder400 / denominator) * 100,
+        ladder300Share: (point.ladder300 / denominator) * 100,
+        ladder200Share: (point.ladder200 / denominator) * 100,
+        ladder100Share: (point.ladder100 / denominator) * 100,
+        ladder0Share: (point.ladder0 / denominator) * 100
+      };
+    });
+  }, [post25TrendData]);
 
-  const paginatedRows = useMemo(() => {
-    const startIndex = (currentPage - 1) * PAGE_SIZE;
-    return projectRows.slice(startIndex, startIndex + PAGE_SIZE);
-  }, [currentPage, projectRows]);
+  const filteredAverageTrend = useMemo(() => {
+    if (!meta) {
+      return trend;
+    }
 
-  const pageStart = projectRows.length === 0 ? 0 : (currentPage - 1) * PAGE_SIZE + 1;
-  const pageEnd = Math.min(currentPage * PAGE_SIZE, projectRows.length);
+    if (trendRange === "post25") {
+      return trend.filter((point) => point.day >= meta.config.campaignStart);
+    }
 
-  if (loading) {
+    if (trendRange === "last14") {
+      return trend.slice(-14);
+    }
+
+    if (trendRange === "last7") {
+      return trend.slice(-7);
+    }
+
+    return trend;
+  }, [meta, trend, trendRange]);
+
+  const availableDays = useMemo(() => {
+    return post25TrendData.map((point) => point.day);
+  }, [post25TrendData]);
+
+  const availableDivisions = meta?.filters?.divisions ?? [];
+  const availableSegments = meta?.filters?.segments ?? [];
+
+  const totalPages = Math.max(1, Math.ceil(projectTotal / PAGE_SIZE));
+  const pageStart = projectTotal === 0 ? 0 : (currentPage - 1) * PAGE_SIZE + 1;
+  const pageEnd = Math.min(currentPage * PAGE_SIZE, projectTotal);
+
+  if (!error && (metaLoading || !hasLoadedSummary)) {
     return <div className="shell">Loading dashboard...</div>;
   }
 
@@ -339,41 +531,23 @@ export function App() {
 
   return (
     <div className="shell" onClick={() => setActiveHint(null)}>
-      <header className="hero">
+      <header className="hero heroSingle">
         <div>
           <p className="eyebrow">Pricing Monitor</p>
-          <h1>Executive dashboard ติดตามการขึ้นราคาเทียบเป้า 300 บาท</h1>
+          <h1>Executive dashboard ติดตามการขึ้นราคา</h1>
           <p className="subtle">
-            Baseline ใช้ช่วง {meta.config.baselineStart} ถึง {meta.config.baselineEnd}
-            {" "}และติดตามผลตั้งแต่ {meta.config.campaignStart} เป็นต้นไป โดยใช้
-            {" "}NP_AVG เป็น net price
+            ใช้ NP_AVG เป็น net price เพื่อนำไปเทียบกับ Baseline
+            {" "}ซึ่งอ้างอิงช่วง {meta.config.baselineStart} ถึง {meta.config.baselineEnd}
+            {" "}และติดตามผลตั้งแต่ {meta.config.campaignStart} เป็นต้นไป
           </p>
-        </div>
-        <div className="heroCard">
-          <div>
-            <span>ข้อมูลทั้งหมด</span>
-            <strong>{formatNumber(meta.metadata.total_rows)} rows</strong>
-          </div>
-          <div>
-            <span>จำนวนไซต์ทั้งหมด</span>
-            <strong>{formatNumber(meta.metadata.total_sites)} sites</strong>
-          </div>
-          <div>
-            <span>ไซต์ที่เทียบได้จริง</span>
-            <strong>{formatNumber(summary.comparableSites)} sites</strong>
-          </div>
-          <div>
-            <span>ต่ำกว่าเป้า 300</span>
-            <strong>{formatNumber(summary.belowTargetSites)} sites</strong>
-          </div>
         </div>
       </header>
 
       <section className="gridStats">
         <article className="statCard">
-          <span>Average increase</span>
-          <strong>{formatNumber(summary.avgIncrease)} บาท</strong>
-          <p>เฉลี่ยการขึ้นราคาล่าสุดเทียบ baseline</p>
+          <span>Total increase</span>
+          <strong>{formatNumber(summary.totalIncrease)} บาท</strong>
+          <p>ผลรวมการขึ้นราคาล่าสุดเทียบ baseline</p>
         </article>
         <article className="statCard">
           <span>Average to target</span>
@@ -392,96 +566,166 @@ export function App() {
         </article>
       </section>
 
-      <section className="ladderGrid">
-        {ladderCards.map((card) => (
-          <button
-            key={card.key}
-            className={`ladderCard ${selectedBucket === card.key ? "selected" : ""}`}
-            onClick={() =>
-              setSelectedBucket((current) => (current === card.key ? "" : card.key))
-            }
-            type="button"
-          >
-            <span>{card.title}</span>
-            <strong>{formatNumber(card.value)}</strong>
-            <small>คลิกเพื่อ filter ตาราง</small>
-          </button>
-        ))}
-      </section>
-
-      <section className="panel sectionPanel">
-        <div className="panelHeader">
-          <div>
-            <h2>ภาพรวมหลังวันที่ 25</h2>
-            <p>ดูว่าวันไหนมีโครงการขยับขึ้นราคาเข้าแต่ละขั้นบันไดมากน้อยแค่ไหน</p>
-          </div>
-        </div>
-        <div className="chartWrap tall">
-          <ResponsiveContainer width="100%" height="100%">
-            <BarChart data={trend}>
-              <CartesianGrid strokeDasharray="3 3" stroke="#2f3e65" />
-              <XAxis dataKey="day" tickFormatter={formatShortDate} stroke="#9fb0d0" />
-              <YAxis stroke="#9fb0d0" />
-              <Tooltip />
-              <Legend />
-              <Bar dataKey="ladder300" stackId="a" fill="#34d399" name="300+" />
-              <Bar dataKey="ladder200" stackId="a" fill="#38bdf8" name="200-299" />
-              <Bar dataKey="ladder100" stackId="a" fill="#fbbf24" name="100-199" />
-              <Bar dataKey="ladder0" stackId="a" fill="#fb7185" name="0-99" />
-            </BarChart>
-          </ResponsiveContainer>
-        </div>
-      </section>
-
-      <section className="twoColumn">
-        <article className="panel">
+      <section className="chartStack sectionPanel">
+        <article className="panel chartPanel">
           <div className="panelHeader">
             <div>
-              <h2>Average progress to target</h2>
-              <p>ค่าเฉลี่ยการขึ้นราคาเทียบเป้า 300 บาทในแต่ละวัน</p>
+              <h2>% สัดส่วนโครงการตามระดับการขึ้นราคา</h2>
+              <p>
+                มุมมองนี้แสดงเป็น 100% stacked bar เพื่อให้เห็นสัดส่วนแต่ละ ladder ต่อวัน
+                หลังวันที่ 25 และเปลี่ยนตามฟิลเตอร์ที่เลือก
+              </p>
+            </div>
+            <div className="chartSummaryPills">
+              <span className="summaryPill">{formatNumber(summary.comparableSites)} sites</span>
+              <button
+                type="button"
+                className="clearFilterButton"
+                onClick={() => {
+                  setSelectedDivisions([]);
+                  setSelectedSegments([]);
+                }}
+              >
+                ล้างตัวกรอง
+              </button>
             </div>
           </div>
-          <div className="chartWrap">
+
+          <div className="compactFilterDock">
+            <div className="compactFilterRow">
+              <span className="compactFilterLabel">DIVISION</span>
+              <div className="compactFilterChips">
+                <button
+                  type="button"
+                  className={`compactFilterChip ${selectedDivisions.length === 0 ? "selected" : ""}`}
+                  onClick={() => setSelectedDivisions([])}
+                >
+                  ทั้งหมด
+                </button>
+                {availableDivisions.map((division) => (
+                  <button
+                    key={division}
+                    type="button"
+                    className={`compactFilterChip ${selectedDivisions.includes(division) ? "selected" : ""}`}
+                    onClick={() => toggleValue(division, setSelectedDivisions)}
+                  >
+                    {division}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            <div className="compactFilterRow">
+              <span className="compactFilterLabel">SEGMENT</span>
+              <div className="compactFilterChips">
+                <button
+                  type="button"
+                  className={`compactFilterChip ${selectedSegments.length === 0 ? "selected" : ""}`}
+                  onClick={() => setSelectedSegments([])}
+                >
+                  ทั้งหมด
+                </button>
+                {availableSegments.map((segment) => (
+                  <button
+                    key={segment}
+                    type="button"
+                    className={`compactFilterChip ${selectedSegments.includes(segment) ? "selected" : ""}`}
+                    onClick={() => toggleValue(segment, setSelectedSegments)}
+                  >
+                    {segment}
+                  </button>
+                ))}
+              </div>
+            </div>
+          </div>
+
+          <div className="chartWrap proportionChart">
             <ResponsiveContainer width="100%" height="100%">
-              <LineChart data={trend}>
+              <BarChart data={proportionTrendData} barCategoryGap="10%">
                 <CartesianGrid strokeDasharray="3 3" stroke="#2f3e65" />
                 <XAxis dataKey="day" tickFormatter={formatShortDate} stroke="#9fb0d0" />
-                <YAxis stroke="#9fb0d0" />
-                <Tooltip />
-                <Line
-                  type="monotone"
-                  dataKey="avgTargetPercent"
-                  stroke="#f59e0b"
-                  strokeWidth={3}
-                  dot={false}
-                  name="% to target"
+                <YAxis
+                  domain={[0, 100]}
+                  tickFormatter={formatPercentTick}
+                  stroke="#9fb0d0"
                 />
-              </LineChart>
+                <Tooltip
+                  labelFormatter={(label, payload) => {
+                    const point = payload?.[0]?.payload as ShareTrendPoint | undefined;
+                    return `${formatThaiDateShort(String(label))}${
+                      point ? ` • ${formatNumber(point.siteCount)} โครงการ` : ""
+                    }`;
+                  }}
+                  formatter={(value, name, item) => {
+                    const countKey = String(item.dataKey).replace("Share", "") as keyof ShareTrendPoint;
+                    const point = item.payload as ShareTrendPoint;
+                    return [
+                      `${formatNumber(Number(value))}% (${formatNumber(Number(point[countKey] ?? 0))} โครงการ)`,
+                      String(name)
+                    ];
+                  }}
+                />
+                <Legend />
+                {trendBucketSeries.map((series) => (
+                  <Bar
+                    key={series.shareKey}
+                    dataKey={series.shareKey}
+                    stackId="share"
+                    fill={series.fill}
+                    name={series.name}
+                  >
+                    <LabelList dataKey={series.shareKey} content={renderPercentBarLabel} />
+                  </Bar>
+                ))}
+              </BarChart>
             </ResponsiveContainer>
           </div>
         </article>
 
-        <article className="panel">
+        <article className="panel chartPanel">
           <div className="panelHeader">
             <div>
-              <h2>โครงการที่ยังต่ำกว่าเป้ามากที่สุด</h2>
-              <p>เลือกโครงการเพื่อดู trend รายวันหลังวันที่ 25</p>
+              <h2>ค่าเฉลี่ยการขึ้นราคาเทียบ Baseline รายวัน</h2>
+              <p>
+                เส้นนี้ยังคงช่วยดู momentum ว่าค่าเฉลี่ยการขึ้นราคาเคลื่อนไปทางไหน
+                ภายใต้ฟิลเตอร์เดียวกับกราฟสัดส่วนด้านบน
+              </p>
             </div>
+            <label className="chartRangeField">
+              <span>เลือกช่วงเวลา</span>
+              <select
+                value={trendRange}
+                onChange={(event) => setTrendRange(event.target.value as TrendRange)}
+              >
+                <option value="all">ทั้งหมด</option>
+                <option value="post25">หลังวันที่ 25</option>
+                <option value="last14">14 วันล่าสุด</option>
+                <option value="last7">7 วันล่าสุด</option>
+              </select>
+            </label>
           </div>
-          <div className="chartWrap">
+          <div className="chartWrap lineInsightChart">
             <ResponsiveContainer width="100%" height="100%">
-              <BarChart data={leaderboardChartData} layout="vertical" margin={{ left: 12 }}>
+              <LineChart data={filteredAverageTrend}>
                 <CartesianGrid strokeDasharray="3 3" stroke="#2f3e65" />
-                <XAxis type="number" stroke="#9fb0d0" />
-                <YAxis
-                  type="category"
-                  dataKey="siteNo"
-                  width={80}
-                  stroke="#9fb0d0"
+                <XAxis dataKey="day" tickFormatter={formatShortDate} stroke="#9fb0d0" />
+                <YAxis stroke="#9fb0d0" tickFormatter={formatNumber} />
+                <Tooltip
+                  formatter={(value, name) => [
+                    formatBaht(Number(value ?? 0)),
+                    String(name)
+                  ]}
                 />
-                <Tooltip />
-                <Bar dataKey="targetPercent" fill="#f97316" name="% to target" />
-              </BarChart>
+                <Legend />
+                <Line
+                  type="monotone"
+                  dataKey="avgIncrease"
+                  stroke="#fb7185"
+                  strokeWidth={3}
+                  dot
+                  name="Average increase"
+                />
+              </LineChart>
             </ResponsiveContainer>
           </div>
         </article>
@@ -503,62 +747,46 @@ export function App() {
               <LineChart data={selectedTrend}>
                 <CartesianGrid strokeDasharray="3 3" stroke="#2f3e65" />
                 <XAxis dataKey="day" tickFormatter={formatShortDate} stroke="#9fb0d0" />
-                <YAxis stroke="#9fb0d0" />
-                <Tooltip />
+                <YAxis
+                  yAxisId="price"
+                  stroke="#9fb0d0"
+                  tickFormatter={formatNumber}
+                  width={84}
+                />
+                <YAxis
+                  yAxisId="increase"
+                  orientation="right"
+                  stroke="#9fb0d0"
+                  tickFormatter={formatNumber}
+                  width={84}
+                />
+                <Tooltip
+                  formatter={(value, name) => [
+                    formatBaht(Number(value ?? 0)),
+                    String(name)
+                  ]}
+                />
                 <Legend />
                 <Line
                   type="monotone"
-                  dataKey="increaseAmount"
-                  stroke="#34d399"
+                  yAxisId="price"
+                  dataKey="postNetPrice"
+                  stroke="#7dd3fc"
                   strokeWidth={3}
                   dot
-                  name="Increase (Baht)"
+                  name="ราคาขาย (บาท)"
                 />
                 <Line
                   type="monotone"
-                  dataKey="targetPercent"
-                  stroke="#60a5fa"
-                  strokeWidth={2}
-                  dot={false}
-                  name="% to target"
+                  yAxisId="increase"
+                  dataKey="increaseAmount"
+                  stroke={bucketColors.top}
+                  strokeWidth={3}
+                  dot
+                  name="ขึ้นราคา (บาท)"
                 />
               </LineChart>
             </ResponsiveContainer>
-          </div>
-        </article>
-
-        <article className="panel miniLegend">
-          <div className="panelHeader">
-            <div>
-              <h2>หลักการคำนวณ</h2>
-              <p>ยึด net price จาก `NP_AVG` และจัดขั้นบันไดจากราคาที่ขึ้นได้จริง</p>
-            </div>
-          </div>
-          <div className="ruleList">
-            <div>
-              <strong>Baseline</strong>
-              <span>weighted average net price ช่วงวันที่ 1-24</span>
-            </div>
-            <div>
-              <strong>Post-25</strong>
-              <span>ใช้ราคาล่าสุดของแต่ละไซต์ตั้งแต่วันที่ 25 เป็นต้นไป</span>
-            </div>
-            <div>
-              <strong>Increase</strong>
-              <span>current net price - baseline net price</span>
-            </div>
-            <div>
-              <strong>Percent to target</strong>
-              <span>(increase / 300) x 100</span>
-            </div>
-            <div className="bucketChips">
-              {bucketLabels.map((bucket) => (
-                <span key={bucket.key} className="chip">
-                  <i className={bucket.tone} />
-                  {bucket.label}
-                </span>
-              ))}
-            </div>
           </div>
         </article>
       </section>
@@ -567,163 +795,191 @@ export function App() {
         <div className="panelHeader controls">
           <div>
             <h2>Project table</h2>
-            <p>คลิกแถวเพื่อดูกราฟรายโครงการด้านบน และแสดงทีละ 20 รายการ</p>
+            <p>คลิกแถวเพื่อดูกราฟรายโครงการ และกรองข้อมูลด้วยวันร่วมกับ ladder ได้</p>
           </div>
-          <div className="controlRow">
+        </div>
+
+        <div className="filterShell">
+          <div className="filterInlineRow">
             <input
+              className="searchField"
               value={search}
               onChange={(event) => setSearch(event.target.value)}
               placeholder="ค้นหา SITE_NAME, SITE_NO, division"
             />
-            <label className="toggle">
-              <input
-                type="checkbox"
-                checked={onlyBelowTarget}
-                onChange={(event) => setOnlyBelowTarget(event.target.checked)}
-              />
-              <span>แสดงเฉพาะต่ำกว่าเป้า 300</span>
-            </label>
-          </div>
-        </div>
-
-        <div className="tableToolbar">
-          <div className="bucketFilterGroup">
-            <button
-              type="button"
-              className={`bucketFilter ${selectedBucket === "" ? "selected" : ""}`}
-              onClick={() => setSelectedBucket("")}
-            >
-              ทั้งหมด
-            </button>
-            {bucketLabels.map((bucket) => (
-              <button
-                key={bucket.key}
-                type="button"
-                className={`bucketFilter ${selectedBucket === bucket.key ? "selected" : ""}`}
-                onClick={() => setSelectedBucket(bucket.key)}
+            <label className="filterField filterFieldSelect compactField">
+              <span>เลือกวันที่</span>
+              <select
+                value={selectedDay}
+                onChange={(event) => setSelectedDay(event.target.value)}
               >
-                {bucket.key}
+                <option value="">ราคาล่าสุดทุกวัน</option>
+                {availableDays.map((day) => (
+                  <option key={day} value={day}>
+                    {formatThaiDate(day)}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <div className="bucketFilterGroup inlineBuckets">
+              <button
+                type="button"
+                className={`bucketFilter ${selectedBucket === "" ? "selected" : ""}`}
+                onClick={() => setSelectedBucket("")}
+              >
+                ทั้งหมด
               </button>
-            ))}
+              {bucketLabels.map((bucket) => (
+                <button
+                  key={bucket.key}
+                  type="button"
+                  className={`bucketFilter ${selectedBucket === bucket.key ? "selected" : ""}`}
+                  onClick={() => setSelectedBucket(bucket.key)}
+                >
+                  {bucket.key}
+                </button>
+              ))}
+            </div>
           </div>
-          <div className="paginationSummary">
-            แสดง {pageStart}-{pageEnd} จาก {formatNumber(projectRows.length)} รายการ
+
+          <div className="filterMetaRow">
+            <div className="paginationSummary">
+              กรองอยู่: {selectedBucket || "ทั้งหมด"} /{" "}
+              {selectedDay ? formatThaiDateShort(selectedDay) : "ราคาล่าสุด"}
+            </div>
+            <div className="paginationSummary">
+              {hasLoadedProjects
+                ? `แสดง ${pageStart}-${pageEnd} จาก ${formatNumber(projectTotal)} รายการ`
+                : "กำลังโหลดรายการโครงการ..."}
+            </div>
           </div>
         </div>
 
-        <div className="explanationBox">
-          <strong>คำอธิบาย Increase และ % Target</strong>
+        <details className="explanationBox explanationBoxCollapsible">
+          <summary>คำอธิบาย Increase และ % Target</summary>
           <p>
-            `Increase` คือส่วนต่างระหว่าง net price ล่าสุดหลังวันที่ 25 กับ baseline
-            ช่วงวันที่ 1-24 ดังนั้นถ้าค่าติดลบ แปลว่าราคาล่าสุดยังต่ำกว่า baseline
-            ไม่ได้หมายถึงข้อมูลผิด
+            `Increase` คือส่วนต่างระหว่างค่า NP_AVG ของวันที่เลือก
+            หรือราคาล่าสุดถ้ายังไม่ได้เลือกวัน กับ baseline ช่วงวันที่ 1-24
+            โดยถ้าราคาวันนั้นต่ำกว่า baseline ระบบจะนับเป็น 0 บาท เพื่อให้เห็นเฉพาะจำนวนบาทที่ขึ้นจริง
           </p>
           <p>
             `% Target` คิดจากสูตร `(Increase / 300) x 100` จึงสามารถติดลบได้เช่นกัน
             หากโครงการนั้นยังต่ำกว่าระดับ baseline เดิม
           </p>
-        </div>
+        </details>
 
         <div className="tableWrap">
-          <table>
-            <thead>
-              <tr>
-                <th>SITE_NO</th>
-                <th>SITE_NAME</th>
-                <th>
-                  <HeaderWithHint
-                    hintKey="ladder"
-                    label="Ladder"
-                    hint={tableColumnHelp.ladder}
-                    activeHint={activeHint}
-                    onToggle={(key) =>
-                      setActiveHint((current) => (current === key ? null : key))
-                    }
-                  />
-                </th>
-                <th>
-                  <HeaderWithHint
-                    hintKey="baseline"
-                    label="Baseline"
-                    hint={tableColumnHelp.baseline}
-                    activeHint={activeHint}
-                    onToggle={(key) =>
-                      setActiveHint((current) => (current === key ? null : key))
-                    }
-                  />
-                </th>
-                <th>
-                  <HeaderWithHint
-                    hintKey="current"
-                    label="Current"
-                    hint={tableColumnHelp.current}
-                    activeHint={activeHint}
-                    onToggle={(key) =>
-                      setActiveHint((current) => (current === key ? null : key))
-                    }
-                  />
-                </th>
-                <th>
-                  <HeaderWithHint
-                    hintKey="increase"
-                    label="Increase vs Baseline"
-                    hint={tableColumnHelp.increase}
-                    activeHint={activeHint}
-                    onToggle={(key) =>
-                      setActiveHint((current) => (current === key ? null : key))
-                    }
-                  />
-                </th>
-                <th>
-                  <HeaderWithHint
-                    hintKey="target"
-                    label="% of 300 Target"
-                    hint={tableColumnHelp.target}
-                    activeHint={activeHint}
-                    onToggle={(key) =>
-                      setActiveHint((current) => (current === key ? null : key))
-                    }
-                  />
-                </th>
-                <th>
-                  <HeaderWithHint
-                    hintKey="latestDay"
-                    label="Latest day"
-                    hint={tableColumnHelp.latestDay}
-                    activeHint={activeHint}
-                    onToggle={(key) =>
-                      setActiveHint((current) => (current === key ? null : key))
-                    }
-                  />
-                </th>
-              </tr>
-            </thead>
-            <tbody>
-              {paginatedRows.map((row) => (
-                <tr
-                  key={row.siteNo}
-                  onClick={() => setSelectedSite(row.siteNo)}
-                  className={selectedSite === row.siteNo ? "activeRow" : ""}
-                >
-                  <td>{row.siteNo}</td>
-                  <td>
-                    <div className="siteCell">
-                      <strong>{row.siteName}</strong>
-                      <span>
-                        {row.divisionName} / {row.fcName}
-                      </span>
-                    </div>
-                  </td>
-                  <td>{row.ladder}</td>
-                  <td>{formatNumber(row.baselineNetPrice)}</td>
-                  <td>{formatNumber(row.currentNetPrice)}</td>
-                  <td>{formatNumber(row.increaseAmount)}</td>
-                  <td>{formatPercent(row.targetPercent)}</td>
-                  <td>{row.latestDay}</td>
+          {hasLoadedProjects ? (
+            <table>
+              <thead>
+                <tr>
+                  <th>SITE_NO</th>
+                  <th>SITE_NAME</th>
+                  <th>
+                    <HeaderWithHint
+                      hintKey="ladder"
+                      label="Ladder"
+                      hint={tableColumnHelp.ladder}
+                      activeHint={activeHint}
+                      onToggle={(key) =>
+                        setActiveHint((current) => (current === key ? null : key))
+                      }
+                    />
+                  </th>
+                  <th>
+                    <HeaderWithHint
+                      hintKey="baseline"
+                      label="Baseline"
+                      hint={tableColumnHelp.baseline}
+                      activeHint={activeHint}
+                      onToggle={(key) =>
+                        setActiveHint((current) => (current === key ? null : key))
+                      }
+                    />
+                  </th>
+                  <th>
+                    <HeaderWithHint
+                      hintKey="current"
+                      label="Current"
+                      hint={
+                        selectedDay
+                          ? "net price ของโครงการในวันที่เลือก"
+                          : tableColumnHelp.current
+                      }
+                      activeHint={activeHint}
+                      onToggle={(key) =>
+                        setActiveHint((current) => (current === key ? null : key))
+                      }
+                    />
+                  </th>
+                  <th>
+                    <HeaderWithHint
+                      hintKey="increase"
+                      label="Increase vs Baseline"
+                      hint={tableColumnHelp.increase}
+                      activeHint={activeHint}
+                      onToggle={(key) =>
+                        setActiveHint((current) => (current === key ? null : key))
+                      }
+                    />
+                  </th>
+                  <th>
+                    <HeaderWithHint
+                      hintKey="target"
+                      label="% of 300 Target"
+                      hint={tableColumnHelp.target}
+                      activeHint={activeHint}
+                      onToggle={(key) =>
+                        setActiveHint((current) => (current === key ? null : key))
+                      }
+                    />
+                  </th>
+                  <th>
+                    <HeaderWithHint
+                      hintKey="latestDay"
+                      label={selectedDay ? "Selected day" : "Latest day"}
+                      hint={
+                        selectedDay
+                          ? "วันที่ที่ใช้กรองในตารางนี้"
+                          : tableColumnHelp.latestDay
+                      }
+                      activeHint={activeHint}
+                      onToggle={(key) =>
+                        setActiveHint((current) => (current === key ? null : key))
+                      }
+                    />
+                  </th>
                 </tr>
-              ))}
-            </tbody>
-          </table>
+              </thead>
+              <tbody>
+                {projectRows.map((row) => (
+                  <tr
+                    key={row.siteNo}
+                    onClick={() => setSelectedSite(row.siteNo)}
+                    className={selectedSite === row.siteNo ? "activeRow" : ""}
+                  >
+                    <td>{row.siteNo}</td>
+                    <td>
+                      <div className="siteCell">
+                        <strong>{row.siteName}</strong>
+                        <span>
+                          {row.divisionName} / {row.fcName}
+                        </span>
+                      </div>
+                    </td>
+                    <td>{row.ladder}</td>
+                    <td>{formatNumber(row.baselineNetPrice)}</td>
+                    <td>{formatNumber(row.currentNetPrice)}</td>
+                    <td>{formatNumber(row.increaseAmount)}</td>
+                    <td>{formatPercent(row.targetPercent)}</td>
+                    <td>{row.latestDay}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          ) : (
+            <div className="tableLoadingState">กำลังโหลดรายการโครงการ...</div>
+          )}
         </div>
 
         <div className="paginationBar">

@@ -2,40 +2,101 @@ import cors from "cors";
 import express from "express";
 import path from "path";
 import {
+  formatHandlerError,
   getMeta,
   getProjectTrend,
   getProjects,
   getSummary,
-  getTrend
+  getTrend,
+  warmRemoteSnapshot
 } from "./api-handlers.js";
 
 const app = express();
 app.use(cors());
 
-app.get("/api/meta", (_req, res) => {
-  res.json(getMeta());
+app.get("/api/meta", async (_req, res) => {
+  try {
+    res.json(await getMeta());
+  } catch (error) {
+    res.status(502).json(formatHandlerError(error));
+  }
 });
 
-app.get("/api/summary", (_req, res) => {
-  res.json(getSummary());
+app.get("/api/summary", async (_req, res) => {
+  try {
+    const divisions = String(_req.query.divisions ?? "")
+      .split(",")
+      .map((value) => value.trim())
+      .filter(Boolean);
+    const segments = String(_req.query.segments ?? "")
+      .split(",")
+      .map((value) => value.trim())
+      .filter(Boolean);
+
+    res.json(await getSummary({ divisions, segments }));
+  } catch (error) {
+    res.status(502).json(formatHandlerError(error));
+  }
 });
 
-app.get("/api/trend", (_req, res) => {
-  res.json(getTrend());
+app.get("/api/trend", async (req, res) => {
+  try {
+    const divisions = String(req.query.divisions ?? "")
+      .split(",")
+      .map((value) => value.trim())
+      .filter(Boolean);
+    const segments = String(req.query.segments ?? "")
+      .split(",")
+      .map((value) => value.trim())
+      .filter(Boolean);
+
+    res.json(await getTrend({ divisions, segments }));
+  } catch (error) {
+    res.status(502).json(formatHandlerError(error));
+  }
 });
 
-app.get("/api/projects", (req, res) => {
-  res.json(
-    getProjects({
-      search: String(req.query.search ?? ""),
-      ladder: String(req.query.ladder ?? ""),
-      onlyBelowTarget: String(req.query.onlyBelowTarget ?? "") === "true"
-    })
-  );
+app.get("/api/projects", async (req, res) => {
+  try {
+    res.json(
+      await getProjects({
+        search: String(req.query.search ?? ""),
+        ladder: String(req.query.ladder ?? ""),
+        day: String(req.query.day ?? ""),
+        page: Number(req.query.page ?? 1),
+        pageSize: Number(req.query.pageSize ?? 20),
+        divisions: String(req.query.divisions ?? "")
+          .split(",")
+          .map((value) => value.trim())
+          .filter(Boolean),
+        segments: String(req.query.segments ?? "")
+          .split(",")
+          .map((value) => value.trim())
+          .filter(Boolean)
+      })
+    );
+  } catch (error) {
+    res.status(502).json(formatHandlerError(error));
+  }
 });
 
-app.get("/api/projects/:siteNo/trend", (req, res) => {
-  res.json(getProjectTrend(req.params.siteNo));
+app.get("/api/projects/:siteNo/trend", async (req, res) => {
+  try {
+    res.json(
+      await getProjectTrend(req.params.siteNo, {
+        divisions: String(req.query.divisions ?? "")
+          .split(",")
+          .map((value) => value.trim())
+          .filter(Boolean),
+        segments: String(req.query.segments ?? "")
+          .split(",")
+          .map((value) => value.trim())
+          .filter(Boolean)
+      })
+    );
+  } catch (error) {
+    res.status(502).json(formatHandlerError(error));
+  }
 });
 
 const port = Number(process.env.PORT ?? 8787);
@@ -48,4 +109,5 @@ app.get("/{*splat}", (req, res) => {
 
 app.listen(port, () => {
   console.log(`Pricing monitor API listening on http://localhost:${port}`);
+  warmRemoteSnapshot();
 });

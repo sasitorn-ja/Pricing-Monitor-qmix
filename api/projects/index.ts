@@ -1,14 +1,26 @@
-import { getProjects } from "../../server/api-handlers.js";
+import { formatHandlerError, getProjects } from "../../server/api-handlers.js";
 import type { ApiRequest, ApiResponse } from "../_shared.js";
 import { readQueryValue, sendJson } from "../_shared.js";
 
-export default function handler(req: ApiRequest, res: ApiResponse) {
-  return sendJson(
-    res,
-    getProjects({
-      search: readQueryValue(req.query, "search"),
-      ladder: readQueryValue(req.query, "ladder"),
-      onlyBelowTarget: readQueryValue(req.query, "onlyBelowTarget") === "true"
-    })
-  );
+export default async function handler(req: ApiRequest, res: ApiResponse) {
+  try {
+    return sendJson(
+      res,
+      await getProjects({
+        search: readQueryValue(req.query, "search"),
+        ladder: readQueryValue(req.query, "ladder"),
+        day: readQueryValue(req.query, "day"),
+        divisions: readQueryValue(req.query, "divisions")
+          .split(",")
+          .map((value) => value.trim())
+          .filter(Boolean),
+        segments: readQueryValue(req.query, "segments")
+          .split(",")
+          .map((value) => value.trim())
+          .filter(Boolean)
+      })
+    );
+  } catch (error) {
+    return sendJson(res, formatHandlerError(error), 502);
+  }
 }

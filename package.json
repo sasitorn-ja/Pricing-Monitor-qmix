@@ -5,14 +5,12 @@
   "type": "module",
   "scripts": {
     "dev": "concurrently \"npm:dev:server\" \"npm:dev:client\"",
-    "dev:client": "vite",
-    "dev:server": "node --import tsx --watch server/index.ts",
-    "build": "npm run import-data && tsc -b && vite build",
-    "import-data": "node --import tsx scripts/import-data.ts",
-    "start": "node --import tsx server/index.ts"
+    "dev:client": "vite --host 127.0.0.1",
+    "dev:server": "node --env-file=.env --import tsx server/index.ts",
+    "build": "tsc -b && vite build",
+    "start": "node --env-file=.env --import tsx server/index.ts"
   },
   "dependencies": {
-    "better-sqlite3": "^12.4.1",
     "cors": "^2.8.5",
     "express": "^5.1.0",
     "react": "^19.2.0",

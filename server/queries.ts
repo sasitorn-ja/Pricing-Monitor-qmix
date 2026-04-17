@@ -98,18 +98,71 @@ FROM latest_status
 
 export const trendQuery = `
 ${analyticsCte}
+,
+movement_base AS (
+  SELECT
+    siteNo,
+    day,
+    ladder,
+    CASE ladder
+      WHEN '0-99' THEN 1
+      WHEN '100-199' THEN 2
+      WHEN '200-299' THEN 3
+      WHEN '300+' THEN 4
+    END AS ladderRank,
+    LAG(
+      CASE ladder
+        WHEN '0-99' THEN 1
+        WHEN '100-199' THEN 2
+        WHEN '200-299' THEN 3
+        WHEN '300+' THEN 4
+      END
+    ) OVER (PARTITION BY siteNo ORDER BY day) AS previousLadderRank
+  FROM post_vs_baseline
+)
 SELECT
-  day,
+  pvb.day,
   COUNT(*) AS siteCount,
-  SUM(CASE WHEN ladder = '300+' THEN 1 ELSE 0 END) AS ladder300,
-  SUM(CASE WHEN ladder = '200-299' THEN 1 ELSE 0 END) AS ladder200,
-  SUM(CASE WHEN ladder = '100-199' THEN 1 ELSE 0 END) AS ladder100,
-  SUM(CASE WHEN ladder = '0-99' THEN 1 ELSE 0 END) AS ladder0,
-  ROUND(AVG(increaseAmount), 2) AS avgIncrease,
-  ROUND(AVG(targetPercent), 2) AS avgTargetPercent
-FROM post_vs_baseline
-GROUP BY day
-ORDER BY day
+  SUM(CASE WHEN pvb.ladder = '300+' THEN 1 ELSE 0 END) AS ladder300,
+  SUM(CASE WHEN pvb.ladder = '200-299' THEN 1 ELSE 0 END) AS ladder200,
+  SUM(CASE WHEN pvb.ladder = '100-199' THEN 1 ELSE 0 END) AS ladder100,
+  SUM(CASE WHEN pvb.ladder = '0-99' THEN 1 ELSE 0 END) AS ladder0,
+  ROUND(AVG(pvb.increaseAmount), 2) AS avgIncrease,
+  ROUND(AVG(pvb.targetPercent), 2) AS avgTargetPercent,
+  SUM(
+    CASE
+      WHEN mb.ladder = '300+'
+       AND (mb.previousLadderRank IS NULL OR mb.ladderRank > mb.previousLadderRank)
+      THEN 1 ELSE 0
+    END
+  ) AS moveInto300,
+  SUM(
+    CASE
+      WHEN mb.ladder = '200-299'
+       AND (mb.previousLadderRank IS NULL OR mb.ladderRank > mb.previousLadderRank)
+      THEN 1 ELSE 0
+    END
+  ) AS moveInto200,
+  SUM(
+    CASE
+      WHEN mb.ladder = '100-199'
+       AND (mb.previousLadderRank IS NULL OR mb.ladderRank > mb.previousLadderRank)
+      THEN 1 ELSE 0
+    END
+  ) AS moveInto100,
+  SUM(
+    CASE
+      WHEN mb.ladder = '0-99'
+       AND mb.previousLadderRank IS NULL
+      THEN 1 ELSE 0
+    END
+  ) AS moveInto0
+FROM post_vs_baseline pvb
+INNER JOIN movement_base mb
+  ON mb.siteNo = pvb.siteNo
+ AND mb.day = pvb.day
+GROUP BY pvb.day
+ORDER BY pvb.day
 `;
 
 export const projectStatusQuery = `
