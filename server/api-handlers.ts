@@ -20,8 +20,15 @@ type CachedFilteredSnapshot = {
   snapshot: AnalyticsSnapshot;
 };
 
-const REMOTE_FETCH_TIMEOUT_MS = 15_000;
+const DEFAULT_REMOTE_FETCH_TIMEOUT_MS = 30_000;
+const parsedRemoteFetchTimeoutMs = Number(process.env.DATAOCEAN_TIMEOUT_MS ?? "");
+const REMOTE_FETCH_TIMEOUT_MS =
+  Number.isFinite(parsedRemoteFetchTimeoutMs) && parsedRemoteFetchTimeoutMs > 0
+    ? parsedRemoteFetchTimeoutMs
+    : DEFAULT_REMOTE_FETCH_TIMEOUT_MS;
 const MEMORY_CACHE_TTL_MS = 5 * 60 * 1000;
+const REMOTE_FETCH_MAX_RETRIES = 2;
+const RETRY_BACKOFF_MS = 1_000;
 const PERSISTED_CACHE_PATH = path.join(
   process.cwd(),
   ".cache",
@@ -44,6 +51,10 @@ let pendingRemoteSnapshot:
 let pendingCacheHydration: Promise<void> | null = null;
 let hasHydratedPersistedCache = false;
 
+function wait(ms: number) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
 async function fetchRemoteRecords() {
   const apiUrl = process.env.DATAOCEAN_API_URL ?? "";
   const apiToken = process.env.DATAOCEAN_API_TOKEN ?? "";
@@ -54,25 +65,39 @@ async function fetchRemoteRecords() {
     );
   }
 
-  const response = await fetch(apiUrl, {
-    headers: {
-      Authorization: `Bearer ${apiToken}`,
-      Accept: "application/json"
-    },
-    signal: AbortSignal.timeout(REMOTE_FETCH_TIMEOUT_MS)
-  });
+  let lastError: unknown = null;
 
-  if (!response.ok) {
-    throw new Error(`Remote API request failed with status ${response.status}`);
+  for (let attempt = 1; attempt <= REMOTE_FETCH_MAX_RETRIES; attempt += 1) {
+    try {
+      const response = await fetch(apiUrl, {
+        headers: {
+          Authorization: `Bearer ${apiToken}`,
+          Accept: "application/json"
+        },
+        signal: AbortSignal.timeout(REMOTE_FETCH_TIMEOUT_MS)
+      });
+
+      if (!response.ok) {
+        throw new Error(`Remote API request failed with status ${response.status}`);
+      }
+
+      const body = (await response.json()) as unknown;
+
+      if (!Array.isArray(body)) {
+        throw new Error("Remote API response is not an array");
+      }
+
+      return body as PricingRecord[];
+    } catch (error) {
+      lastError = error;
+
+      if (attempt < REMOTE_FETCH_MAX_RETRIES) {
+        await wait(RETRY_BACKOFF_MS * attempt);
+      }
+    }
   }
 
-  const body = (await response.json()) as unknown;
-
-  if (!Array.isArray(body)) {
-    throw new Error("Remote API response is not an array");
-  }
-
-  return body as PricingRecord[];
+  throw lastError instanceof Error ? lastError : new Error("Unknown remote fetch error");
 }
 
 async function persistRemoteRecords(records: PricingRecord[]) {
@@ -199,7 +224,18 @@ async function getRemoteSnapshot() {
     };
   }
 
-  return pendingRemoteSnapshot;
+  try {
+    return await pendingRemoteSnapshot;
+  } catch (error) {
+    if (remoteCache.snapshot && remoteCache.records) {
+      return {
+        snapshot: remoteCache.snapshot,
+        records: remoteCache.records
+      };
+    }
+
+    throw error;
+  }
 }
 
 function normalizeFilterValues(values: string[] = []) {
