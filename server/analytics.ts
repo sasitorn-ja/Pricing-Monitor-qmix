@@ -601,11 +601,7 @@ export function buildAnalytics(records: PricingRecord[]): AnalyticsBundle {
     summaryByDay.set(day, summarizeProjects(rows));
   }
 
-  const latestSummaryDay = trend.at(-1)?.day ?? null;
-  const summary =
-    latestSummaryDay && summaryByDay.has(latestSummaryDay)
-      ? summaryByDay.get(latestSummaryDay)!
-      : summarizeProjects([]);
+  const summary = summarizeProjects(projects);
 
   return {
     metadata: {
