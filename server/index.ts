@@ -33,7 +33,7 @@ app.get("/api/summary", async (_req, res) => {
       .map((value) => value.trim())
       .filter(Boolean);
 
-    res.json(await getSummary({ divisions, segments }));
+    res.json(await getSummary({ divisions, segments, day: String(_req.query.day ?? "") }));
   } catch (error) {
     res.status(502).json(formatHandlerError(error));
   }

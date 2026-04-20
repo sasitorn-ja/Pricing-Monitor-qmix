@@ -103,6 +103,25 @@ type PostDailyRow = {
   ladderRank: number;
 };
 
+type SummaryStats = {
+  comparableSites: number;
+  ladder500: number;
+  ladder400: number;
+  ladder300: number;
+  ladder200: number;
+  ladder100: number;
+  ladder0: number;
+  belowTargetSites: number;
+  totalIncrease: number;
+  avgIncrease: number;
+  avgTargetPercent: number;
+  targetHitShare: number;
+  minIncrease: number;
+  maxIncrease: number;
+  latestDayMin: string | null;
+  latestDayMax: string | null;
+};
+
 type AnalyticsBundle = {
   metadata: {
     total_rows: number;
@@ -110,21 +129,8 @@ type AnalyticsBundle = {
     min_dp_date: string | null;
     max_dp_date: string | null;
   };
-  summary: {
-    comparableSites: number;
-    ladder500: number;
-    ladder400: number;
-    ladder300: number;
-    ladder200: number;
-    ladder100: number;
-    ladder0: number;
-    belowTargetSites: number;
-    totalIncrease: number;
-    avgIncrease: number;
-    avgTargetPercent: number;
-    minIncrease: number;
-    maxIncrease: number;
-  };
+  summary: SummaryStats;
+  summaryByDay: Map<string, SummaryStats>;
   trend: TrendPoint[];
   projects: ProjectRow[];
   dailyProjects: ProjectRow[];
@@ -177,6 +183,51 @@ function safeString(value: string | null) {
   return value ?? "";
 }
 
+function summarizeProjects(rows: ProjectRow[]): SummaryStats {
+  const comparableSites = rows.length;
+  const increaseList = rows.map((row) => row.increaseAmount);
+  const totalIncrease = increaseList.reduce((sum, value) => sum + value, 0);
+  const latestDays = rows.map((row) => row.latestDay);
+  const totalPostVolume = rows.reduce((sum, row) => sum + row.postVolume, 0);
+  const weightedIncreasePerUnit =
+    totalPostVolume > 0
+      ? rows.reduce((sum, row) => sum + row.increaseAmount * row.postVolume, 0) /
+        totalPostVolume
+      : comparableSites
+        ? totalIncrease / comparableSites
+        : 0;
+  const targetHitSites = rows.filter(
+    (row) => row.increaseAmount >= TARGET_INCREASE
+  ).length;
+
+  return {
+    comparableSites,
+    ladder500: rows.filter((row) => row.ladder === "500+").length,
+    ladder400: rows.filter((row) => row.ladder === "400-499").length,
+    ladder300: rows.filter((row) => row.ladder === "300-399").length,
+    ladder200: rows.filter((row) => row.ladder === "200-299").length,
+    ladder100: rows.filter((row) => row.ladder === "100-199").length,
+    ladder0: rows.filter((row) => row.ladder === "0-99").length,
+    belowTargetSites: rows.filter((row) => row.increaseAmount < TARGET_INCREASE).length,
+    totalIncrease: round2(totalIncrease),
+    avgIncrease: round2(weightedIncreasePerUnit),
+    avgTargetPercent: comparableSites
+      ? round2(rows.reduce((sum, row) => sum + row.targetPercent, 0) / comparableSites)
+      : 0,
+    targetHitShare: comparableSites ? round2((targetHitSites / comparableSites) * 100) : 0,
+    minIncrease: comparableSites ? round2(Math.min(...increaseList)) : 0,
+    maxIncrease: comparableSites ? round2(Math.max(...increaseList)) : 0,
+    latestDayMin:
+      latestDays.length > 0
+        ? latestDays.reduce((min, day) => (day.localeCompare(min) < 0 ? day : min))
+        : null,
+    latestDayMax:
+      latestDays.length > 0
+        ? latestDays.reduce((max, day) => (day.localeCompare(max) > 0 ? day : max))
+        : null
+  };
+}
+
 export function buildAnalytics(records: PricingRecord[]): AnalyticsBundle {
   const siteSet = new Set<string>();
   let minDate: string | null = null;
@@ -192,8 +243,8 @@ export function buildAnalytics(records: PricingRecord[]): AnalyticsBundle {
       sectName: string;
       segment: string;
       channel: string;
-      priceTotal: number;
-      discountTotal: number;
+      priceWeightedTotal: number;
+      discountWeightedTotal: number;
       recordCount: number;
       totalVolume: number;
     }
@@ -205,8 +256,8 @@ export function buildAnalytics(records: PricingRecord[]): AnalyticsBundle {
       siteNo: string;
       siteName: string;
       day: string;
-      priceTotal: number;
-      discountTotal: number;
+      priceWeightedTotal: number;
+      discountWeightedTotal: number;
       recordCount: number;
       totalVolume: number;
     }
@@ -230,8 +281,9 @@ export function buildAnalytics(records: PricingRecord[]): AnalyticsBundle {
 
     const npAvg = Number(record.NP_AVG ?? 0);
     const sumQ = Number(record.SUMQ ?? 0);
+    const volume = Number.isFinite(sumQ) && sumQ > 0 ? sumQ : 0;
 
-    if (!Number.isFinite(npAvg)) {
+    if (!Number.isFinite(npAvg) || volume <= 0) {
       continue;
     }
 
@@ -244,17 +296,17 @@ export function buildAnalytics(records: PricingRecord[]): AnalyticsBundle {
         sectName: safeString(record.SECT_NAME),
         segment: safeString(record.SEGMENT),
         channel: safeString(record.CHANNEL),
-        priceTotal: 0,
-        discountTotal: 0,
+        priceWeightedTotal: 0,
+        discountWeightedTotal: 0,
         recordCount: 0,
         totalVolume: 0
       };
 
       const dcAvg = Number(record.DC_AVG ?? 0);
-      current.priceTotal += npAvg;
-      current.discountTotal += Number.isFinite(dcAvg) ? dcAvg : 0;
+      current.priceWeightedTotal += npAvg * volume;
+      current.discountWeightedTotal += (Number.isFinite(dcAvg) ? dcAvg : 0) * volume;
       current.recordCount += 1;
-      current.totalVolume += Number.isFinite(sumQ) && sumQ > 0 ? sumQ : 0;
+      current.totalVolume += volume;
       baselineAccumulator.set(siteNo, current);
     }
 
@@ -264,17 +316,17 @@ export function buildAnalytics(records: PricingRecord[]): AnalyticsBundle {
         siteNo,
         siteName: safeString(record.SITE_NAME),
         day: dpDate.raw,
-        priceTotal: 0,
-        discountTotal: 0,
+        priceWeightedTotal: 0,
+        discountWeightedTotal: 0,
         recordCount: 0,
         totalVolume: 0
       };
 
       const dcAvg = Number(record.DC_AVG ?? 0);
-      current.priceTotal += npAvg;
-      current.discountTotal += Number.isFinite(dcAvg) ? dcAvg : 0;
+      current.priceWeightedTotal += npAvg * volume;
+      current.discountWeightedTotal += (Number.isFinite(dcAvg) ? dcAvg : 0) * volume;
       current.recordCount += 1;
-      current.totalVolume += Number.isFinite(sumQ) && sumQ > 0 ? sumQ : 0;
+      current.totalVolume += volume;
       postAccumulator.set(key, current);
     }
   }
@@ -296,7 +348,7 @@ export function buildAnalytics(records: PricingRecord[]): AnalyticsBundle {
   >();
 
   for (const [siteNo, value] of baselineAccumulator) {
-    if (value.recordCount <= 0) {
+    if (value.totalVolume <= 0) {
       continue;
     }
 
@@ -308,8 +360,8 @@ export function buildAnalytics(records: PricingRecord[]): AnalyticsBundle {
       sectName: value.sectName,
       segment: value.segment,
       channel: value.channel,
-      baselineNetPrice: value.priceTotal / value.recordCount,
-      baselineDisc: value.discountTotal / value.recordCount,
+      baselineNetPrice: value.priceWeightedTotal / value.totalVolume,
+      baselineDisc: value.discountWeightedTotal / value.totalVolume,
       baselineVolume: value.totalVolume
     });
   }
@@ -318,12 +370,12 @@ export function buildAnalytics(records: PricingRecord[]): AnalyticsBundle {
 
   for (const value of postAccumulator.values()) {
     const baseline = baselineMap.get(value.siteNo);
-    if (!baseline || value.recordCount <= 0) {
+    if (!baseline || value.totalVolume <= 0) {
       continue;
     }
 
-    const postNetPrice = value.priceTotal / value.recordCount;
-    const postDisc = value.discountTotal / value.recordCount;
+    const postNetPrice = value.priceWeightedTotal / value.totalVolume;
+    const postDisc = value.discountWeightedTotal / value.totalVolume;
     const rawIncreaseAmount = postNetPrice - baseline.baselineNetPrice;
     const increaseAmount = Math.max(rawIncreaseAmount, 0);
     const targetPercent = (increaseAmount / TARGET_INCREASE) * 100;
@@ -373,6 +425,8 @@ export function buildAnalytics(records: PricingRecord[]): AnalyticsBundle {
       ladder0: number;
       avgIncreaseTotal: number;
       avgTargetPercentTotal: number;
+      weightedIncreaseTotal: number;
+      postVolumeTotal: number;
       moveInto500: number;
       moveInto400: number;
       moveInto300: number;
@@ -399,6 +453,8 @@ export function buildAnalytics(records: PricingRecord[]): AnalyticsBundle {
       ladder0: 0,
       avgIncreaseTotal: 0,
       avgTargetPercentTotal: 0,
+      weightedIncreaseTotal: 0,
+      postVolumeTotal: 0,
       moveInto500: 0,
       moveInto400: 0,
       moveInto300: 0,
@@ -410,6 +466,8 @@ export function buildAnalytics(records: PricingRecord[]): AnalyticsBundle {
     dayBucket.siteCount += 1;
     dayBucket.avgIncreaseTotal += row.increaseAmount;
     dayBucket.avgTargetPercentTotal += row.targetPercent;
+    dayBucket.weightedIncreaseTotal += row.increaseAmount * row.postVolume;
+    dayBucket.postVolumeTotal += row.postVolume;
 
     if (row.ladder === "500+") dayBucket.ladder500 += 1;
     else if (row.ladder === "400-499") dayBucket.ladder400 += 1;
@@ -457,7 +515,11 @@ export function buildAnalytics(records: PricingRecord[]): AnalyticsBundle {
       ladder200: bucket.ladder200,
       ladder100: bucket.ladder100,
       ladder0: bucket.ladder0,
-      avgIncrease: round2(bucket.avgIncreaseTotal / bucket.siteCount),
+      avgIncrease: round2(
+        bucket.postVolumeTotal > 0
+          ? bucket.weightedIncreaseTotal / bucket.postVolumeTotal
+          : bucket.avgIncreaseTotal / bucket.siteCount
+      ),
       avgTargetPercent: round2(bucket.avgTargetPercentTotal / bucket.siteCount),
       moveInto500: bucket.moveInto500,
       moveInto400: bucket.moveInto400,
@@ -527,9 +589,23 @@ export function buildAnalytics(records: PricingRecord[]): AnalyticsBundle {
       return a.latestDay.localeCompare(b.latestDay);
     });
 
-  const comparableSites = projects.length;
-  const increaseList = projects.map((row) => row.increaseAmount);
-  const totalIncrease = increaseList.reduce((sum, value) => sum + value, 0);
+  const dailyProjectsByDay = new Map<string, ProjectRow[]>();
+  for (const row of dailyProjects) {
+    const rows = dailyProjectsByDay.get(row.latestDay) ?? [];
+    rows.push(row);
+    dailyProjectsByDay.set(row.latestDay, rows);
+  }
+
+  const summaryByDay = new Map<string, SummaryStats>();
+  for (const [day, rows] of dailyProjectsByDay) {
+    summaryByDay.set(day, summarizeProjects(rows));
+  }
+
+  const latestSummaryDay = trend.at(-1)?.day ?? null;
+  const summary =
+    latestSummaryDay && summaryByDay.has(latestSummaryDay)
+      ? summaryByDay.get(latestSummaryDay)!
+      : summarizeProjects([]);
 
   return {
     metadata: {
@@ -538,23 +614,8 @@ export function buildAnalytics(records: PricingRecord[]): AnalyticsBundle {
       min_dp_date: minDate,
       max_dp_date: maxDate
     },
-    summary: {
-      comparableSites,
-      ladder500: projects.filter((row) => row.ladder === "500+").length,
-      ladder400: projects.filter((row) => row.ladder === "400-499").length,
-      ladder300: projects.filter((row) => row.ladder === "300-399").length,
-      ladder200: projects.filter((row) => row.ladder === "200-299").length,
-      ladder100: projects.filter((row) => row.ladder === "100-199").length,
-      ladder0: projects.filter((row) => row.ladder === "0-99").length,
-      belowTargetSites: projects.filter((row) => row.increaseAmount < TARGET_INCREASE).length,
-      totalIncrease: round2(totalIncrease),
-      avgIncrease: comparableSites ? round2(totalIncrease / comparableSites) : 0,
-      avgTargetPercent: comparableSites
-        ? round2(projects.reduce((sum, row) => sum + row.targetPercent, 0) / comparableSites)
-        : 0,
-      minIncrease: comparableSites ? round2(Math.min(...increaseList)) : 0,
-      maxIncrease: comparableSites ? round2(Math.max(...increaseList)) : 0
-    },
+    summary,
+    summaryByDay,
     trend,
     projects,
     dailyProjects,

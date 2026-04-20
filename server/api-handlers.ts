@@ -13,6 +13,7 @@ type AnalyticsSnapshot = ReturnType<typeof buildAnalytics>;
 type FilterParams = {
   divisions?: string[];
   segments?: string[];
+  day?: string;
 };
 
 type CachedFilteredSnapshot = {
@@ -335,7 +336,7 @@ export async function getMeta() {
 
 export async function getSummary(filters: FilterParams = {}) {
   const snapshot = await getFilteredSnapshot(filters);
-  return snapshot.summary;
+  return filters.day ? (snapshot.summaryByDay.get(filters.day) ?? snapshot.summary) : snapshot.summary;
 }
 
 export async function getTrend(filters: FilterParams = {}) {
@@ -362,6 +363,11 @@ export async function getProjects(params: {
     pageSize = 20
   } = params;
   const normalizedSearch = search.trim().toLowerCase();
+  const ladders = ladder
+    .split(",")
+    .map((value) => value.trim())
+    .filter(Boolean);
+  const ladderSet = new Set(ladders);
   let rows: ProjectRow[];
 
   const snapshot = await getFilteredSnapshot({ divisions, segments });
@@ -381,8 +387,8 @@ export async function getProjects(params: {
     });
   }
 
-  if (ladder) {
-    rows = rows.filter((row) => row.ladder === ladder);
+  if (ladderSet.size > 0) {
+    rows = rows.filter((row) => ladderSet.has(row.ladder));
   }
 
   const total = rows.length;

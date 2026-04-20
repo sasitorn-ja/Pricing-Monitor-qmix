@@ -44,8 +44,11 @@ type SummaryResponse = {
   totalIncrease: number;
   avgIncrease: number;
   avgTargetPercent: number;
+  targetHitShare: number;
   minIncrease: number;
   maxIncrease: number;
+  latestDayMin?: string | null;
+  latestDayMax?: string | null;
 };
 
 type TrendPoint = {
@@ -111,6 +114,15 @@ type ProjectResponse = {
 };
 
 type TrendRange = "all" | "post25" | "last14" | "last7";
+type CalcHelpKey =
+  | "totalIncrease"
+  | "averageToTarget"
+  | "lowestIncrease"
+  | "highestIncrease"
+  | "proportionChart"
+  | "averageTrend"
+  | "projectTrend"
+  | "projectTable";
 
 const bucketLabels = [
   { key: "500+", label: "500 บาทขึ้นไป", tone: "bg-green-600" },
@@ -140,6 +152,7 @@ const trendBucketSeries = [
 ] as const;
 
 const PAGE_SIZE = 20;
+const MULTI_LADDER_FETCH_SIZE = 100_000;
 const SEARCH_DEBOUNCE_MS = 250;
 const API_TIMEOUT_MS = 20_000;
 const tableColumnHelp = {
@@ -191,6 +204,10 @@ function formatNumber(value: number) {
 }
 
 function formatPercent(value: number) {
+  if (!Number.isFinite(value)) {
+    return "0%";
+  }
+
   return `${formatNumber(value)}%`;
 }
 
@@ -222,6 +239,22 @@ function formatThaiDateShort(value: string) {
     month: "short",
     day: "numeric"
   });
+}
+
+function formatSummaryDateRange(summary: SummaryResponse, fallbackDay?: string) {
+  if ((!summary.latestDayMin || !summary.latestDayMax) && fallbackDay) {
+    return `ข้อมูลล่าสุดถึง ${formatThaiDateShort(fallbackDay)}`;
+  }
+
+  if (!summary.latestDayMin || !summary.latestDayMax) {
+    return "ไม่มีวันที่คำนวณ";
+  }
+
+  if (summary.latestDayMin === summary.latestDayMax) {
+    return `ณ วันที่ ${formatThaiDateShort(summary.latestDayMax)}`;
+  }
+
+  return `ช่วงวันที่ ${formatThaiDateShort(summary.latestDayMin)} ถึง ${formatThaiDateShort(summary.latestDayMax)}`;
 }
 
 function renderPercentBarLabel(props: any) {
@@ -472,7 +505,7 @@ export function App() {
   const [trend, setTrend] = useState<TrendPoint[]>([]);
   const [projectRows, setProjectRows] = useState<ProjectRow[]>([]);
   const [projectTotal, setProjectTotal] = useState(0);
-  const [selectedBucket, setSelectedBucket] = useState("");
+  const [selectedBuckets, setSelectedBuckets] = useState<string[]>([]);
   const [selectedDay, setSelectedDay] = useState("");
   const [search, setSearch] = useState("");
   const [selectedDivisions, setSelectedDivisions] = useState<string[]>([]);
@@ -487,6 +520,7 @@ export function App() {
   const [activeHint, setActiveHint] = useState<keyof typeof tableColumnHelp | null>(
     null
   );
+  const [activeCalcHelp, setActiveCalcHelp] = useState<CalcHelpKey | null>(null);
   const [metaLoading, setMetaLoading] = useState(true);
   const [error, setError] = useState("");
 
@@ -545,6 +579,9 @@ export function App() {
       try {
         setError("");
         const params = buildFilterQuery();
+        if (selectedDay) {
+          params.set("day", selectedDay);
+        }
         const query = params.toString();
         const suffix = query ? `?${query}` : "";
 
@@ -564,33 +601,70 @@ export function App() {
     }
 
     void loadFilteredDashboard();
-  }, [selectedDivisions, selectedSegments]);
+  }, [selectedDay, selectedDivisions, selectedSegments]);
 
   useEffect(() => {
     async function loadProjects() {
       try {
         setError("");
-        const params = buildFilterQuery();
-
-        if (selectedBucket) {
-          params.set("ladder", selectedBucket);
-        }
+        const baseParams = buildFilterQuery();
 
         if (selectedDay) {
-          params.set("day", selectedDay);
+          baseParams.set("day", selectedDay);
         }
 
         if (debouncedSearch) {
-          params.set("search", debouncedSearch);
+          baseParams.set("search", debouncedSearch);
         }
 
-        params.set("page", String(currentPage));
-        params.set("pageSize", String(PAGE_SIZE));
+        let projectResponse: ProjectResponse;
 
-        const query = params.toString();
-        const projectResponse = await fetchJson<ProjectResponse>(
-          `/api/projects${query ? `?${query}` : ""}`
-        );
+        if (selectedBuckets.length > 1) {
+          const responses = await Promise.all(
+            selectedBuckets.map((bucket) => {
+              const params = new URLSearchParams(baseParams);
+              params.set("ladder", bucket);
+              params.set("page", "1");
+              params.set("pageSize", String(MULTI_LADDER_FETCH_SIZE));
+              const query = params.toString();
+
+              return fetchJson<ProjectResponse>(`/api/projects?${query}`);
+            })
+          );
+          const rows = responses
+            .flatMap((response) => response.rows)
+            .sort((a, b) => {
+              if (a.latestDay === b.latestDay) {
+                if (a.increaseAmount === b.increaseAmount) {
+                  return a.siteName.localeCompare(b.siteName);
+                }
+
+                return a.increaseAmount - b.increaseAmount;
+              }
+
+              return a.latestDay.localeCompare(b.latestDay);
+            });
+          const startIndex = (currentPage - 1) * PAGE_SIZE;
+
+          projectResponse = {
+            rows: rows.slice(startIndex, startIndex + PAGE_SIZE),
+            total: rows.length
+          };
+        } else {
+          const params = new URLSearchParams(baseParams);
+
+          if (selectedBuckets.length === 1) {
+            params.set("ladder", selectedBuckets[0]);
+          }
+
+          params.set("page", String(currentPage));
+          params.set("pageSize", String(PAGE_SIZE));
+
+          const query = params.toString();
+          projectResponse = await fetchJson<ProjectResponse>(
+            `/api/projects${query ? `?${query}` : ""}`
+          );
+        }
 
         setProjectRows(projectResponse.rows);
         setProjectTotal(projectResponse.total);
@@ -614,7 +688,7 @@ export function App() {
   }, [
     currentPage,
     debouncedSearch,
-    selectedBucket,
+    selectedBuckets,
     selectedDay,
     selectedDivisions,
     selectedSegments
@@ -622,7 +696,7 @@ export function App() {
 
   useEffect(() => {
     setCurrentPage(1);
-  }, [search, selectedBucket, selectedDay, selectedDivisions, selectedSegments]);
+  }, [search, selectedBuckets, selectedDay, selectedDivisions, selectedSegments]);
 
   useEffect(() => {
     async function loadSelectedTrend() {
@@ -701,10 +775,15 @@ export function App() {
   const availableSegments = meta?.filters?.segments ?? [];
 
   const totalPages = Math.max(1, Math.ceil(projectTotal / PAGE_SIZE));
+  const firstProjectIndex = projectTotal === 0 ? 0 : (currentPage - 1) * PAGE_SIZE + 1;
+  const lastProjectIndex = Math.min(currentPage * PAGE_SIZE, projectTotal);
+  const tableScopeLabel = selectedDay
+    ? `วันที่ ${formatThaiDateShort(selectedDay)}`
+    : "ราคาล่าสุด";
   const activeTableFilters: Array<{ label: string; value: string }> = [];
 
-  if (selectedBucket) {
-    activeTableFilters.push({ label: "Ladder", value: selectedBucket });
+  if (selectedBuckets.length > 0) {
+    activeTableFilters.push({ label: "Ladder", value: selectedBuckets.join(", ") });
   }
 
   if (selectedDay) {
@@ -743,12 +822,95 @@ export function App() {
     return <div className="shell">Cannot load dashboard: {error || "missing data"}</div>;
   }
 
+  const latestTrendDay = post25TrendData.at(-1)?.day ?? meta.metadata.max_dp_date;
+  const targetHitSites = summary.comparableSites - summary.belowTargetSites;
+  const targetHitShare = Number.isFinite(summary.targetHitShare)
+    ? summary.targetHitShare
+    : summary.comparableSites > 0
+      ? (targetHitSites / summary.comparableSites) * 100
+      : 0;
+  const summaryDateRange = formatSummaryDateRange(summary, latestTrendDay);
+  const calcHelpContent: Record<CalcHelpKey, { title: string; lines: string[] }> = {
+    totalIncrease: {
+      title: "ราคาเพิ่มเฉลี่ย คำนวณยังไง",
+      lines: [
+        "ค่านี้คือราคาเพิ่มเฉลี่ยต่อ B/Q โดยถ่วงน้ำหนักด้วยปริมาณขาย ไม่ใช่ผลรวมบาทของทุกโครงการ",
+        "สูตร: ผลรวมของ (ราคาที่เพิ่มขึ้น x ปริมาณขาย) หารด้วย ผลรวมปริมาณขาย",
+        "ราคาที่เพิ่มขึ้น = ราคาปัจจุบัน - ราคา Baseline และถ้าต่ำกว่า Baseline จะนับเป็น 0",
+        `คำนวณจากข้อมูล ${summaryDateRange}`
+      ]
+    },
+    averageToTarget: {
+      title: "สัดส่วนโครงการที่ถึงเป้า คำนวณยังไง",
+      lines: [
+        "ค่านี้คือสัดส่วนโครงการที่ขึ้นถึงเป้า 300 บาท B/C ขึ้นไป",
+        "สูตร: จำนวนโครงการที่ราคาขึ้นตั้งแต่ 300 บาทขึ้นไป หารด้วย จำนวนโครงการทั้งหมดที่มีข้อมูลครบ แล้วคูณ 100",
+        `ตอนนี้ใช้ ${formatNumber(targetHitSites)} จาก ${formatNumber(summary.comparableSites)} โครงการ`,
+        `คำนวณจากข้อมูล ${summaryDateRange}`
+      ]
+    },
+    lowestIncrease: {
+      title: "ขึ้นจาก Baseline ต่ำสุด คำนวณยังไง",
+      lines: [
+        "ค่านี้คือโครงการที่เพิ่มราคาจาก Baseline น้อยที่สุดในชุดข้อมูลที่กำลังคำนวณ",
+        "สูตร: เลือกค่าราคาที่เพิ่มขึ้นต่ำสุดจากทุกโครงการ",
+        "ถ้าราคาต่ำกว่า Baseline ระบบนับราคาที่เพิ่มขึ้นเป็น 0",
+        `คำนวณจาก ${formatNumber(summary.comparableSites)} โครงการ`
+      ]
+    },
+    highestIncrease: {
+      title: "ขึ้นจาก Baseline สูงสุด คำนวณยังไง",
+      lines: [
+        "ค่านี้คือโครงการที่เพิ่มราคาจาก Baseline มากที่สุดในชุดข้อมูลที่กำลังคำนวณ",
+        "สูตร: เลือกค่าราคาที่เพิ่มขึ้นสูงสุดจากทุกโครงการ",
+        "ราคาที่เพิ่มขึ้น = ราคาปัจจุบัน - ราคา Baseline และถ้าต่ำกว่า Baseline จะนับเป็น 0",
+        `คำนวณจาก ${formatNumber(summary.comparableSites)} โครงการ`
+      ]
+    },
+    proportionChart: {
+      title: "% สัดส่วนโครงการตามระดับการขึ้นราคา คำนวณยังไง",
+      lines: [
+        "แต่ละแท่งคือ 1 วัน และรวมเป็น 100%",
+        "กราฟนี้นับจำนวนโครงการ ไม่ได้ถ่วงด้วยยอดขายหรือ SUMQ",
+        "สูตรแต่ละสี: จำนวนโครงการในช่วงราคานั้นของวัน หารด้วย จำนวนโครงการทั้งหมดที่มีข้อมูลในวันนั้น แล้วคูณ 100",
+        "ช่วงราคามาจากราคาที่เพิ่มขึ้น เช่น 0-99, 100-199, 200-299, 300-399, 400-499, 500+"
+      ]
+    },
+    averageTrend: {
+      title: "ค่าเฉลี่ยการขึ้นราคาเทียบ Baseline รายวัน คำนวณยังไง",
+      lines: [
+        "แต่ละจุดคือค่าเพิ่มราคาเฉลี่ยรายวันแบบถ่วงน้ำหนักด้วย SUMQ",
+        "สูตร: ผลรวมของ (ราคาที่เพิ่มขึ้นของวัน x ปริมาณขายของวัน) หารด้วย ผลรวมปริมาณขายของวัน",
+        "ราคาที่เพิ่มขึ้นของแต่ละโครงการ = ราคาขายรายวัน - ราคา Baseline และถ้าต่ำกว่า Baseline จะนับเป็น 0"
+      ]
+    },
+    projectTrend: {
+      title: "กราฟรายโครงการ คำนวณยังไง",
+      lines: [
+        "กราฟนี้คำนวณเฉพาะโครงการที่เลือกจากตาราง",
+        "ราคาขายรายวัน = ผลรวมของ (NP_AVG x SUMQ) หารด้วย ผลรวม SUMQ",
+        "ราคาที่เพิ่มขึ้น = ราคาขายรายวัน - ราคา Baseline ของโครงการเดียวกัน และถ้าต่ำกว่า Baseline จะนับเป็น 0"
+      ]
+    },
+    projectTable: {
+      title: "ตารางโครงการ คำนวณยังไง",
+      lines: [
+        "ราคา Baseline = ผลรวมของ (NP_AVG x SUMQ) หารด้วย ผลรวม SUMQ ในช่วงวันที่ 1-24 มี.ค.",
+        "ราคาปัจจุบัน = ราคาของวันที่เลือก หรือราคาล่าสุดของโครงการถ้ายังไม่ได้เลือกวัน",
+        "ราคาที่เพิ่มขึ้น = ราคาปัจจุบัน - ราคา Baseline และถ้าต่ำกว่า Baseline จะนับเป็น 0",
+        "% เทียบเป้า 300 = ราคาที่เพิ่มขึ้น หารด้วย 300 แล้วคูณ 100",
+        `จำนวนโครงการด้านบนตารางคือจำนวนโครงการหลังใช้ filter ทั้งหมด ตารางแสดงทีละ ${formatNumber(PAGE_SIZE)} รายการต่อหน้า`
+      ]
+    }
+  };
+  const activeCalcContent = activeCalcHelp ? calcHelpContent[activeCalcHelp] : null;
+
   return (
     <div className="shell" onClick={() => setActiveHint(null)}>
       <header className="hero heroSingle">
         <div>
           <p className="eyebrow">Pricing Monitor</p>
-          <h1>Executive dashboard ติดตามการขึ้นราคา</h1>
+          <h1>Dashboard ติดตามการขึ้นราคา</h1>
           <p className="subtle">
             ใช้ NP_AVG เป็น net price เพื่อนำไปเทียบกับ Baseline
             {" "}ซึ่งอ้างอิงช่วง {meta.config.baselineStart} ถึง {meta.config.baselineEnd}
@@ -759,24 +921,36 @@ export function App() {
 
       <section className="gridStats">
         <article className="statCard">
+          <button type="button" className="calcHelpButton" onClick={() => setActiveCalcHelp("totalIncrease")}>
+            วิธีคำนวณ
+          </button>
           <span>Total increase</span>
-          <strong>{formatNumber(summary.totalIncrease)} บาท</strong>
-          <p>ผลรวมการขึ้นราคาล่าสุดเทียบ baseline</p>
+          <strong>{formatNumber(summary.avgIncrease)} บาท B/Q</strong>
+          <p>คำนวณจากข้อมูล {summaryDateRange}</p>
         </article>
         <article className="statCard">
+          <button type="button" className="calcHelpButton" onClick={() => setActiveCalcHelp("averageToTarget")}>
+            วิธีคำนวณ
+          </button>
           <span>Average to target</span>
-          <strong>{formatPercent(summary.avgTargetPercent)}</strong>
-          <p>ความคืบหน้าเฉลี่ยเทียบเป้า 300 บาท</p>
+          <strong>{formatPercent(targetHitShare)}</strong>
+          <p>สัดส่วนโครงการที่ขึ้นถึง 300 บาท B/C ขึ้นไป {summaryDateRange}</p>
         </article>
         <article className="statCard">
-          <span>Lowest increase</span>
+          <button type="button" className="calcHelpButton" onClick={() => setActiveCalcHelp("lowestIncrease")}>
+            วิธีคำนวณ
+          </button>
+          <span>ขึ้นจาก Baseline ต่ำสุด</span>
           <strong>{formatNumber(summary.minIncrease)} บาท</strong>
-          <p>โครงการที่ยังถอยจาก baseline มากที่สุด</p>
+          <p>โครงการที่เพิ่มราคาจาก baseline น้อยที่สุด</p>
         </article>
         <article className="statCard">
-          <span>Highest increase</span>
+          <button type="button" className="calcHelpButton" onClick={() => setActiveCalcHelp("highestIncrease")}>
+            วิธีคำนวณ
+          </button>
+          <span>ขึ้นจาก Baseline สูงสุด</span>
           <strong>{formatNumber(summary.maxIncrease)} บาท</strong>
-          <p>โครงการที่ขึ้นราคาได้สูงสุด</p>
+          <p>โครงการที่เพิ่มราคาจาก baseline มากที่สุด</p>
         </article>
       </section>
 
@@ -792,6 +966,9 @@ export function App() {
             </div>
             <div className="chartSummaryPills">
               <span className="summaryPill">{formatNumber(summary.comparableSites)} sites</span>
+              <button type="button" className="calcHelpButton compact" onClick={() => setActiveCalcHelp("proportionChart")}>
+                วิธีคำนวณ
+              </button>
               <button
                 type="button"
                 className="clearFilterButton"
@@ -905,18 +1082,23 @@ export function App() {
                 ภายใต้ฟิลเตอร์เดียวกับกราฟสัดส่วนด้านบน
               </p>
             </div>
-            <label className="chartRangeField">
-              <span>เลือกช่วงเวลา</span>
-              <select
-                value={trendRange}
-                onChange={(event) => setTrendRange(event.target.value as TrendRange)}
-              >
-                <option value="all">ทั้งหมด</option>
-                <option value="post25">หลังวันที่ 25</option>
-                <option value="last14">14 วันล่าสุด</option>
-                <option value="last7">7 วันล่าสุด</option>
-              </select>
-            </label>
+            <div className="panelHeaderActions">
+              <label className="chartRangeField">
+                <span>เลือกช่วงเวลา</span>
+                <select
+                  value={trendRange}
+                  onChange={(event) => setTrendRange(event.target.value as TrendRange)}
+                >
+                  <option value="all">ทั้งหมด</option>
+                  <option value="post25">หลังวันที่ 25</option>
+                  <option value="last14">14 วันล่าสุด</option>
+                  <option value="last7">7 วันล่าสุด</option>
+                </select>
+              </label>
+              <button type="button" className="calcHelpButton compact" onClick={() => setActiveCalcHelp("averageTrend")}>
+                วิธีคำนวณ
+              </button>
+            </div>
           </div>
           <div className="chartWrap lineInsightChart">
             <ResponsiveContainer width="100%" height="100%">
@@ -955,6 +1137,9 @@ export function App() {
                 {selectedSite ? `(${selectedSite})` : ""}
               </p>
             </div>
+            <button type="button" className="calcHelpButton compact" onClick={() => setActiveCalcHelp("projectTrend")}>
+              วิธีคำนวณ
+            </button>
           </div>
           <div className="chartWrap">
             <ResponsiveContainer width="100%" height="100%">
@@ -1011,6 +1196,11 @@ export function App() {
             <h2>Project table</h2>
             <p>คลิกแถวเพื่อดูกราฟรายโครงการ และกรองข้อมูลด้วยวันร่วมกับ ladder ได้</p>
           </div>
+          <div className="tableHeaderActions">
+            <button type="button" className="calcHelpButton compact" onClick={() => setActiveCalcHelp("projectTable")}>
+              วิธีคำนวณ
+            </button>
+          </div>
         </div>
 
         <div className="filterShell projectFilterShell">
@@ -1059,8 +1249,8 @@ export function App() {
             <div className="bucketFilterGroup tableBucketRow">
               <button
                 type="button"
-                className={`bucketFilter ${selectedBucket === "" ? "selected" : ""}`}
-                onClick={() => setSelectedBucket("")}
+                className={`bucketFilter ${selectedBuckets.length === 0 ? "selected" : ""}`}
+                onClick={() => setSelectedBuckets([])}
               >
                 ทั้งหมด
               </button>
@@ -1068,8 +1258,14 @@ export function App() {
                 <button
                   key={bucket.key}
                   type="button"
-                  className={`bucketFilter ${selectedBucket === bucket.key ? "selected" : ""}`}
-                  onClick={() => setSelectedBucket(bucket.key)}
+                  className={`bucketFilter ${selectedBuckets.includes(bucket.key) ? "selected" : ""}`}
+                  onClick={() =>
+                    setSelectedBuckets((current) =>
+                      current.includes(bucket.key)
+                        ? current.filter((key) => key !== bucket.key)
+                        : [...current, bucket.key]
+                    )
+                  }
                 >
                   {bucket.key}
                 </button>
@@ -1096,7 +1292,7 @@ export function App() {
               onClick={() => {
                 setSearch("");
                 setSelectedDay("");
-                setSelectedBucket("");
+                setSelectedBuckets([]);
                 setSelectedDivisions([]);
                 setSelectedSegments([]);
                 setCurrentPage(1);
@@ -1106,19 +1302,6 @@ export function App() {
             </button>
           </div>
         </div>
-
-        <details className="explanationBox explanationBoxCollapsible">
-          <summary>คำอธิบาย Increase และ % Target</summary>
-          <p>
-            `Increase` คือส่วนต่างระหว่างค่า NP_AVG ของวันที่เลือก
-            หรือราคาล่าสุดถ้ายังไม่ได้เลือกวัน กับ baseline ช่วงวันที่ 1-24
-            โดยถ้าราคาวันนั้นต่ำกว่า baseline ระบบจะนับเป็น 0 บาท เพื่อให้เห็นเฉพาะจำนวนบาทที่ขึ้นจริง
-          </p>
-          <p>
-            `% Target` คิดจากสูตร `(Increase / 300) x 100` จึงสามารถติดลบได้เช่นกัน
-            หากโครงการนั้นยังต่ำกว่าระดับ baseline เดิม
-          </p>
-        </details>
 
         <div className="tableWrap">
           {hasLoadedProjects ? (
@@ -1268,7 +1451,9 @@ export function App() {
             ย้อนกลับ
           </button>
           <div className="paginationSummary">
-            หน้า {formatNumber(currentPage)} / {formatNumber(totalPages)}
+            แสดง {formatNumber(firstProjectIndex)}-{formatNumber(lastProjectIndex)}
+            {" "}จาก {formatNumber(projectTotal)} sites • หน้า {formatNumber(currentPage)} /{" "}
+            {formatNumber(totalPages)}
           </div>
           <button
             type="button"
@@ -1280,6 +1465,39 @@ export function App() {
           </button>
         </div>
       </section>
+
+      {activeCalcContent ? (
+        <div
+          className="calcModalBackdrop"
+          role="presentation"
+          onClick={() => setActiveCalcHelp(null)}
+        >
+          <section
+            className="calcModal"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="calc-modal-title"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <div className="calcModalHeader">
+              <h2 id="calc-modal-title">{activeCalcContent.title}</h2>
+              <button
+                type="button"
+                className="calcModalClose"
+                aria-label="ปิดวิธีคำนวณ"
+                onClick={() => setActiveCalcHelp(null)}
+              >
+                ปิด
+              </button>
+            </div>
+            <div className="calcModalBody">
+              {activeCalcContent.lines.map((line) => (
+                <p key={line}>{line}</p>
+              ))}
+            </div>
+          </section>
+        </div>
+      ) : null}
     </div>
   );
 }
