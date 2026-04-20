@@ -1197,6 +1197,14 @@ export function App() {
             <p>คลิกแถวเพื่อดูกราฟรายโครงการ และกรองข้อมูลด้วยวันร่วมกับ ladder ได้</p>
           </div>
           <div className="tableHeaderActions">
+            <div className="tableResultCount" aria-live="polite">
+              <span>ผลลัพธ์ตาราง</span>
+              <strong>{formatNumber(projectTotal)} sites</strong>
+              <small>
+                {tableScopeLabel} • แสดง {formatNumber(firstProjectIndex)}-
+                {formatNumber(lastProjectIndex)}
+              </small>
+            </div>
             <button type="button" className="calcHelpButton compact" onClick={() => setActiveCalcHelp("projectTable")}>
               วิธีคำนวณ
             </button>
