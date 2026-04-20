@@ -392,34 +392,12 @@ select {
   margin: 8px 0 0;
 }
 
-.tableResultCount {
-  display: grid;
-  gap: 4px;
-  min-width: 180px;
-  padding: 10px 14px;
-  border-radius: 16px;
-  border: 1px solid rgba(123, 157, 214, 0.2);
-  background: rgba(13, 25, 45, 0.62);
-  text-align: right;
-}
-
 .tableHeaderActions {
   display: flex;
   gap: 10px;
   align-items: flex-start;
   justify-content: flex-end;
   flex-wrap: wrap;
-}
-
-.tableResultCount span,
-.tableResultCount small {
-  color: #9fb0d0;
-  font-size: 0.82rem;
-}
-
-.tableResultCount strong {
-  color: #e9f0ff;
-  font-size: 1.18rem;
 }
 
 .chartWrap {
@@ -854,7 +832,8 @@ select {
 }
 
 .bucketFilter,
-.pagerButton {
+.pagerButton,
+.pageNumberButton {
   border: 1px solid rgba(123, 157, 214, 0.25);
   background: rgba(7, 17, 34, 0.92);
   color: #dce8ff;
@@ -868,12 +847,14 @@ select {
 }
 
 .bucketFilter:hover,
-.pagerButton:hover {
+.pagerButton:hover,
+.pageNumberButton:hover {
   border-color: rgba(128, 221, 255, 0.55);
   transform: translateY(-1px);
 }
 
-.bucketFilter.selected {
+.bucketFilter.selected,
+.pageNumberButton.active {
   background: rgba(53, 98, 168, 0.85);
   border-color: rgba(128, 221, 255, 0.55);
 }
@@ -885,6 +866,25 @@ select {
 }
 
 .paginationSummary {
+  color: #9fb0d0;
+}
+
+.paginationPages {
+  display: inline-flex;
+  gap: 6px;
+  align-items: center;
+}
+
+.pageNumberButton {
+  min-width: 40px;
+  padding-inline: 12px;
+}
+
+.paginationEllipsis {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 28px;
   color: #9fb0d0;
 }
 
@@ -1023,11 +1023,6 @@ tbody tr:hover,
 
   .chartSummaryPills {
     justify-content: flex-start;
-  }
-
-  .tableResultCount {
-    width: 100%;
-    text-align: left;
   }
 
   .proportionChart,

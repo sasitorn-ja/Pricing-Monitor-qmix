@@ -257,6 +257,33 @@ function formatSummaryDateRange(summary: SummaryResponse, fallbackDay?: string) 
   return `ช่วงวันที่ ${formatThaiDateShort(summary.latestDayMin)} ถึง ${formatThaiDateShort(summary.latestDayMax)}`;
 }
 
+function getPaginationItems(currentPage: number, totalPages: number) {
+  const items: Array<number | "ellipsis"> = [];
+  const addPage = (page: number) => {
+    if (page >= 1 && page <= totalPages && !items.includes(page)) {
+      items.push(page);
+    }
+  };
+
+  addPage(1);
+
+  if (currentPage > 4) {
+    items.push("ellipsis");
+  }
+
+  for (let page = currentPage - 1; page <= currentPage + 1; page += 1) {
+    addPage(page);
+  }
+
+  if (currentPage < totalPages - 3) {
+    items.push("ellipsis");
+  }
+
+  addPage(totalPages);
+
+  return items;
+}
+
 function renderPercentBarLabel(props: any) {
   const x = Number(props.x ?? 0);
   const y = Number(props.y ?? 0);
@@ -777,9 +804,7 @@ export function App() {
   const totalPages = Math.max(1, Math.ceil(projectTotal / PAGE_SIZE));
   const firstProjectIndex = projectTotal === 0 ? 0 : (currentPage - 1) * PAGE_SIZE + 1;
   const lastProjectIndex = Math.min(currentPage * PAGE_SIZE, projectTotal);
-  const tableScopeLabel = selectedDay
-    ? `วันที่ ${formatThaiDateShort(selectedDay)}`
-    : "ราคาล่าสุด";
+  const paginationItems = getPaginationItems(currentPage, totalPages);
   const activeTableFilters: Array<{ label: string; value: string }> = [];
 
   if (selectedBuckets.length > 0) {
@@ -1197,14 +1222,6 @@ export function App() {
             <p>คลิกแถวเพื่อดูกราฟรายโครงการ และกรองข้อมูลด้วยวันร่วมกับ ladder ได้</p>
           </div>
           <div className="tableHeaderActions">
-            <div className="tableResultCount" aria-live="polite">
-              <span>ผลลัพธ์ตาราง</span>
-              <strong>{formatNumber(projectTotal)} sites</strong>
-              <small>
-                {tableScopeLabel} • แสดง {formatNumber(firstProjectIndex)}-
-                {formatNumber(lastProjectIndex)}
-              </small>
-            </div>
             <button type="button" className="calcHelpButton compact" onClick={() => setActiveCalcHelp("projectTable")}>
               วิธีคำนวณ
             </button>
@@ -1456,12 +1473,30 @@ export function App() {
             onClick={() => setCurrentPage((page) => Math.max(1, page - 1))}
             disabled={currentPage === 1}
           >
-            ย้อนกลับ
+            ‹ Previous
           </button>
+          <div className="paginationPages" aria-label="เลือกหน้า">
+            {paginationItems.map((item, index) =>
+              item === "ellipsis" ? (
+                <span key={`ellipsis-${index}`} className="paginationEllipsis">
+                  ...
+                </span>
+              ) : (
+                <button
+                  key={item}
+                  type="button"
+                  className={`pageNumberButton ${currentPage === item ? "active" : ""}`}
+                  onClick={() => setCurrentPage(item)}
+                  aria-current={currentPage === item ? "page" : undefined}
+                >
+                  {formatNumber(item)}
+                </button>
+              )
+            )}
+          </div>
           <div className="paginationSummary">
             แสดง {formatNumber(firstProjectIndex)}-{formatNumber(lastProjectIndex)}
-            {" "}จาก {formatNumber(projectTotal)} sites • หน้า {formatNumber(currentPage)} /{" "}
-            {formatNumber(totalPages)}
+            {" "}จาก {formatNumber(projectTotal)} sites
           </div>
           <button
             type="button"
@@ -1469,7 +1504,7 @@ export function App() {
             onClick={() => setCurrentPage((page) => Math.min(totalPages, page + 1))}
             disabled={currentPage === totalPages}
           >
-            ถัดไป
+            Next ›
           </button>
         </div>
       </section>
