@@ -1058,7 +1058,6 @@ export function App() {
               </p>
             </div>
             <div className="chartSummaryPills">
-              <span className="summaryPill">{formatNumber(summary.comparableSites)} sites</span>
               <button type="button" className="calcHelpButton compact" onClick={() => setActiveCalcHelp("proportionChart")}>
                 วิธีคำนวณ
               </button>
