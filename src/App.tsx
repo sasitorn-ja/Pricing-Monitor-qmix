@@ -144,7 +144,7 @@ type ProjectTrendPoint = {
 };
 
 type ProjectTrendChartPoint = Omit<ProjectTrendPoint, "postNetPrice"> & {
-  postNetPrice: number | null;
+  postNetPrice: number;
   hasRecord: boolean;
   isBaselinePeriod: boolean;
 };
@@ -886,7 +886,7 @@ export function App() {
         siteName: template.siteName,
         day,
         baselineNetPrice: template.baselineNetPrice,
-        postNetPrice: null,
+        postNetPrice: 0,
         increaseAmount: 0,
         targetPercent: 0,
         ladder: "ไม่มีข้อมูลขาย",
@@ -1087,7 +1087,7 @@ export function App() {
         "ช่วง 1-24 มี.ค. ใช้สร้าง Baseline จึงยังไม่ตีความว่าเป็นการขึ้นราคา",
         "ตั้งแต่ 25 มี.ค. เป็นต้นไป เส้นขึ้นราคาคือราคาขายรายวัน - ราคา Baseline ของโครงการเดียวกัน",
         "ถ้าราคาขายรายวันหลัง 25 มี.ค. ต่ำกว่า Baseline จะนับการขึ้นราคาเป็น 0",
-        "วันที่ไม่มีข้อมูลขายจะแสดงเส้นขึ้นราคาเป็น 0 และเว้นเส้นราคาขายไว้ เพื่อไม่ให้เข้าใจผิดว่าราคาขายเป็น 0",
+        "วันที่ไม่มีข้อมูลขายจะแสดงราคาขายและเส้นขึ้นราคาเป็น 0 เพื่อให้กราฟต่อเนื่อง",
         "กราฟรายโครงการแสดงแกนวันตั้งแต่ 1 มี.ค. ถึงวันล่าสุดของข้อมูล"
       ]
     },
@@ -1445,7 +1445,7 @@ export function App() {
                     if (!point.hasRecord) {
                       return [
                         name === "ราคาขาย (บาท)"
-                          ? "ไม่มีข้อมูลขาย"
+                          ? "0 บาท (ไม่มีข้อมูลขาย)"
                           : "ไม่มีข้อมูลขาย (นับเป็น 0)",
                         String(name)
                       ];
@@ -1469,8 +1469,8 @@ export function App() {
                   dataKey="postNetPrice"
                   stroke="#7dd3fc"
                   strokeWidth={3}
-                  dot
-                  connectNulls={false}
+                  dot={false}
+                  activeDot={false}
                   name="ราคาขาย (บาท)"
                 />
                 <Line
