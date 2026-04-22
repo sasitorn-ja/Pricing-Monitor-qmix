@@ -336,7 +336,30 @@ export async function getMeta() {
 
 export async function getSummary(filters: FilterParams = {}) {
   const snapshot = await getFilteredSnapshot(filters);
-  return filters.day ? (snapshot.summaryByDay.get(filters.day) ?? snapshot.summary) : snapshot.summary;
+  if (filters.day) {
+    return snapshot.summaryByDay.get(filters.day) ?? {
+      comparableSites: 0,
+      ladder500: 0,
+      ladder400: 0,
+      ladder300: 0,
+      ladder250: 0,
+      ladder200: 0,
+      ladder100: 0,
+      ladder0: 0,
+      belowTargetSites: 0,
+      totalIncrease: 0,
+      avgIncrease: 0,
+      avgTargetPercent: 0,
+      targetHitShare: 0,
+      minIncrease: 0,
+      maxIncrease: 0,
+      latestDayMin: filters.day,
+      latestDayMax: filters.day
+    };
+  }
+
+  const latestDay = snapshot.trend.at(-1)?.day;
+  return latestDay ? (snapshot.summaryByDay.get(latestDay) ?? snapshot.summary) : snapshot.summary;
 }
 
 export async function getTrend(filters: FilterParams = {}) {

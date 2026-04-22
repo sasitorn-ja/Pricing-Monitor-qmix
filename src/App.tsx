@@ -37,6 +37,7 @@ type SummaryResponse = {
   ladder500: number;
   ladder400: number;
   ladder300: number;
+  ladder250: number;
   ladder200: number;
   ladder100: number;
   ladder0: number;
@@ -54,17 +55,35 @@ type SummaryResponse = {
 type TrendPoint = {
   day: string;
   siteCount: number;
+  noBaseline: number;
   ladder500: number;
   ladder400: number;
   ladder300: number;
+  ladder250: number;
   ladder200: number;
   ladder100: number;
   ladder0: number;
+  volumeTotal: number;
+  volumeNoBaseline: number;
+  volumeLadder500: number;
+  volumeLadder400: number;
+  volumeLadder300: number;
+  volumeLadder250: number;
+  volumeLadder200: number;
+  volumeLadder100: number;
+  volumeLadder0: number;
+  disc0: number;
+  disc3: number;
+  disc6: number;
+  disc9: number;
+  disc12: number;
+  disc15: number;
   avgIncrease: number;
   avgTargetPercent: number;
   moveInto500: number;
   moveInto400: number;
   moveInto300: number;
+  moveInto250: number;
   moveInto200: number;
   moveInto100: number;
   moveInto0: number;
@@ -74,9 +93,25 @@ type ShareTrendPoint = TrendPoint & {
   ladder500Share: number;
   ladder400Share: number;
   ladder300Share: number;
+  ladder250Share: number;
   ladder200Share: number;
   ladder100Share: number;
   ladder0Share: number;
+  noBaselineShare: number;
+  volumeLadder500Share: number;
+  volumeLadder400Share: number;
+  volumeLadder300Share: number;
+  volumeLadder250Share: number;
+  volumeLadder200Share: number;
+  volumeLadder100Share: number;
+  volumeLadder0Share: number;
+  volumeNoBaselineShare: number;
+  disc0Share: number;
+  disc3Share: number;
+  disc6Share: number;
+  disc9Share: number;
+  disc12Share: number;
+  disc15Share: number;
 };
 
 type ProjectRow = {
@@ -115,10 +150,11 @@ type ProjectResponse = {
 
 type TrendRange = "all" | "post25" | "last14" | "last7";
 type CalcHelpKey =
+  | "baselineDefinition"
   | "totalIncrease"
   | "averageToTarget"
-  | "highestIncrease"
   | "proportionChart"
+  | "discountDropChart"
   | "averageTrend"
   | "projectTrend"
   | "projectTable";
@@ -127,7 +163,8 @@ const bucketLabels = [
   { key: "500+", label: "500 บาทขึ้นไป", tone: "bg-green-600" },
   { key: "400-499", label: "400-499 บาท", tone: "bg-green-500" },
   { key: "300-399", label: "300-399 บาท", tone: "bg-emerald-400" },
-  { key: "200-299", label: "200-299 บาท", tone: "bg-sky-400" },
+  { key: "250-299", label: "250-299 บาท", tone: "bg-cyan-400" },
+  { key: "200-249", label: "200-249 บาท", tone: "bg-sky-400" },
   { key: "100-199", label: "100-199 บาท", tone: "bg-amber-400" },
   { key: "0-99", label: "ต่ำกว่า 100 บาท", tone: "bg-rose-400" }
 ] as const;
@@ -136,18 +173,32 @@ const bucketColors = {
   topMax: "#16a34a",
   topHigh: "#22c55e",
   top: "#34d399",
-  high: "#38bdf8",
+  high: "#22d3ee",
+  bridge: "#38bdf8",
   mid: "#fbbf24",
-  low: "#fb7185"
+  low: "#fb7185",
+  missing: "#94a3b8"
 } as const;
 
 const trendBucketSeries = [
+  { shareKey: "noBaselineShare", countKey: "noBaseline", name: "ไม่มี baseline", fill: bucketColors.missing },
   { shareKey: "ladder0Share", countKey: "ladder0", name: "0-99", fill: bucketColors.low },
   { shareKey: "ladder100Share", countKey: "ladder100", name: "100-199", fill: bucketColors.mid },
-  { shareKey: "ladder200Share", countKey: "ladder200", name: "200-299", fill: bucketColors.high },
+  { shareKey: "ladder200Share", countKey: "ladder200", name: "200-249", fill: bucketColors.bridge },
+  { shareKey: "ladder250Share", countKey: "ladder250", name: "250-299", fill: bucketColors.high },
   { shareKey: "ladder300Share", countKey: "ladder300", name: "300-399", fill: bucketColors.top },
   { shareKey: "ladder400Share", countKey: "ladder400", name: "400-499", fill: bucketColors.topHigh },
   { shareKey: "ladder500Share", countKey: "ladder500", name: "500+", fill: bucketColors.topMax }
+] as const;
+
+const discountDropSeries = [
+  { shareKey: "noBaselineShare", countKey: "noBaseline", name: "ไม่มี baseline", fill: bucketColors.missing },
+  { shareKey: "disc0Share", countKey: "disc0", name: "0-2.9%", fill: "#7dd3fc" },
+  { shareKey: "disc3Share", countKey: "disc3", name: "3.0-5.9%", fill: "#38bdf8" },
+  { shareKey: "disc6Share", countKey: "disc6", name: "6.0-8.9%", fill: "#34d399" },
+  { shareKey: "disc9Share", countKey: "disc9", name: "9.0-11.9%", fill: "#fbbf24" },
+  { shareKey: "disc12Share", countKey: "disc12", name: "12.0-14.9%", fill: "#fb923c" },
+  { shareKey: "disc15Share", countKey: "disc15", name: "15%+", fill: "#fb7185" }
 ] as const;
 
 const PAGE_SIZE = 20;
@@ -155,14 +206,14 @@ const MULTI_LADDER_FETCH_SIZE = 100_000;
 const SEARCH_DEBOUNCE_MS = 250;
 const API_TIMEOUT_MS = 20_000;
 const tableColumnHelp = {
-  division: "หน่วยงานขายหรือพื้นที่ที่โครงการนี้สังกัด",
-  segment: "กลุ่มขนาดโครงการเดียวกับที่ใช้กรองในกราฟสัดส่วนด้านบน",
-  ladder: "ระดับการขึ้นราคาเทียบเป้า 300 บาท",
-  baseline: "ค่าเฉลี่ย NP_AVG ตรง ๆ ช่วงวันที่ 1-24",
-  current: "net price ล่าสุดหลังวันที่ 25",
-  increase: "Current - Baseline และถ้าติดลบจะนับเป็น 0 บาท",
-  target: "(Increase / 300) x 100",
-  latestDay: "วันที่ใช้เป็นราคาล่าสุดของโครงการ"
+  division: "พื้นที่ขายหรือหน่วยงานที่โครงการนี้อยู่ ใช้สำหรับกรองและดูภาพรวมแยกตามพื้นที่",
+  segment: "กลุ่มขนาดของโครงการ เช่น tiny, small, medium ใช้ตัวเดียวกับตัวกรอง Segment ด้านบน",
+  ladder: "ช่วงของราคาที่เพิ่มขึ้นเทียบกับ Baseline เช่น 0-99, 100-199, 200-249 หรือ 300 บาทขึ้นไป",
+  baseline: "ราคาอ้างอิงก่อนเริ่มติดตาม คำนวณจาก NP_AVG เฉลี่ยถ่วงปริมาณขายช่วง 1-24 มี.ค.",
+  current: "ราคา NP_AVG ของวันที่แสดงในแถวนี้ ถ้าไม่ได้เลือกวันจะใช้วันล่าสุดของโครงการนั้น",
+  increase: "ราคาที่เพิ่มขึ้น = Current - Baseline ถ้าราคาปัจจุบันต่ำกว่า Baseline จะนับเป็น 0",
+  target: "เปอร์เซ็นต์เทียบเป้า 300 บาท เช่น ขึ้น 150 บาท = 50% และขึ้น 300 บาท = 100%",
+  latestDay: "วันที่ของข้อมูลราคาที่ใช้คำนวณแถวนี้"
 } as const;
 
 async function fetchJson<T>(url: string): Promise<T> {
@@ -760,15 +811,32 @@ export function App() {
   const proportionTrendData = useMemo<ShareTrendPoint[]>(() => {
     return post25TrendData.map((point) => {
       const denominator = point.siteCount || 1;
+      const volumeDenominator = point.volumeTotal || 1;
 
       return {
         ...point,
         ladder500Share: (point.ladder500 / denominator) * 100,
         ladder400Share: (point.ladder400 / denominator) * 100,
         ladder300Share: (point.ladder300 / denominator) * 100,
+        ladder250Share: (point.ladder250 / denominator) * 100,
         ladder200Share: (point.ladder200 / denominator) * 100,
         ladder100Share: (point.ladder100 / denominator) * 100,
-        ladder0Share: (point.ladder0 / denominator) * 100
+        ladder0Share: (point.ladder0 / denominator) * 100,
+        noBaselineShare: (point.noBaseline / denominator) * 100,
+        volumeLadder500Share: (point.volumeLadder500 / volumeDenominator) * 100,
+        volumeLadder400Share: (point.volumeLadder400 / volumeDenominator) * 100,
+        volumeLadder300Share: (point.volumeLadder300 / volumeDenominator) * 100,
+        volumeLadder250Share: (point.volumeLadder250 / volumeDenominator) * 100,
+        volumeLadder200Share: (point.volumeLadder200 / volumeDenominator) * 100,
+        volumeLadder100Share: (point.volumeLadder100 / volumeDenominator) * 100,
+        volumeLadder0Share: (point.volumeLadder0 / volumeDenominator) * 100,
+        volumeNoBaselineShare: (point.volumeNoBaseline / volumeDenominator) * 100,
+        disc0Share: (point.disc0 / denominator) * 100,
+        disc3Share: (point.disc3 / denominator) * 100,
+        disc6Share: (point.disc6 / denominator) * 100,
+        disc9Share: (point.disc9 / denominator) * 100,
+        disc12Share: (point.disc12 / denominator) * 100,
+        disc15Share: (point.disc15 / denominator) * 100
       };
     });
   }, [post25TrendData]);
@@ -855,66 +923,85 @@ export function App() {
       : 0;
   const summaryDateRange = formatSummaryDateRange(summary, latestTrendDay);
   const calcHelpContent: Record<CalcHelpKey, { title: string; lines: string[] }> = {
-    totalIncrease: {
-      title: "ราคาเพิ่มเฉลี่ย คำนวณยังไง",
+    baselineDefinition: {
+      title: "ระบบคำนวณ Baseline",
       lines: [
-        "ค่านี้คือราคาเพิ่มเฉลี่ยต่อ B/Q โดยถ่วงน้ำหนักด้วยปริมาณขาย ไม่ใช่ผลรวมบาทของทุกโครงการ",
-        "สูตร: ผลรวมของ (ราคาที่เพิ่มขึ้น x ปริมาณขาย) หารด้วย ผลรวมปริมาณขาย",
-        "ราคาที่เพิ่มขึ้น = ราคาปัจจุบัน - ราคา Baseline และถ้าต่ำกว่า Baseline จะนับเป็น 0",
-        `คำนวณจากข้อมูล ${summaryDateRange}`
+        "ระบบคำนวณ Baseline แยกเป็นรายโครงการ จากข้อมูลช่วง 1-24 มี.ค. 2026",
+        "สูตร: SUM(NP_AVG x SUMQ) / SUM(SUMQ)",
+        "แปลว่า record ที่มีปริมาณขายมากกว่าจะมีน้ำหนักกับราคา Baseline มากกว่า record ที่ขายน้อย",
+        "หลังวันที่ 25 มี.ค. ระบบจะเอาราคาของแต่ละวันมาเทียบกับ Baseline ของโครงการเดียวกัน",
+        "ถ้าโครงการไม่มีข้อมูลในช่วง 1-24 มี.ค. จะแสดงเป็น 'ไม่มี baseline' สีเทา เพราะยังเทียบราคาไม่ได้"
+      ]
+    },
+    totalIncrease: {
+      title: "Total increase คืออะไร",
+      lines: [
+        "ตัวเลขนี้คือราคาเพิ่มเฉลี่ยต่อ B/Q ของวันที่กำลังดู ไม่ใช่ยอดรวมบาทของทุกโครงการ",
+        "เริ่มจากคำนวณแต่ละโครงการก่อน: ราคาเพิ่มขึ้น = ราคา NP_AVG ของวันนั้น - ราคา Baseline",
+        "ถ้าราคาวันนั้นต่ำกว่า Baseline จะนับราคาเพิ่มขึ้นเป็น 0 เพื่อไม่ให้ค่าลบมาดึงภาพรวมลง",
+        "จากนั้นถ่วงน้ำหนักด้วยปริมาณขาย: SUM(ราคาเพิ่มขึ้น x SUMQ) / SUM(SUMQ)",
+        `ข้อมูลที่ใช้คำนวณคือ ${summaryDateRange}`
       ]
     },
     averageToTarget: {
-      title: "สัดส่วนโครงการที่ถึงเป้า คำนวณยังไง",
+      title: "Average to target คืออะไร",
       lines: [
-        "ค่านี้คือสัดส่วนโครงการที่ขึ้นถึงเป้า 300 บาท B/C ขึ้นไป",
-        "สูตร: จำนวนโครงการที่ราคาขึ้นตั้งแต่ 300 บาทขึ้นไป หารด้วย จำนวนโครงการทั้งหมดที่มีข้อมูลครบ แล้วคูณ 100",
-        `ตอนนี้ใช้ ${formatNumber(targetHitSites)} จาก ${formatNumber(summary.comparableSites)} โครงการ`,
-        `คำนวณจากข้อมูล ${summaryDateRange}`
-      ]
-    },
-    highestIncrease: {
-      title: "ขึ้นจาก Baseline สูงสุด คำนวณยังไง",
-      lines: [
-        "ค่านี้คือโครงการที่เพิ่มราคาจาก Baseline มากที่สุดในชุดข้อมูลที่กำลังคำนวณ",
-        "สูตร: เลือกค่าราคาที่เพิ่มขึ้นสูงสุดจากทุกโครงการ",
-        "ราคาที่เพิ่มขึ้น = ราคาปัจจุบัน - ราคา Baseline และถ้าต่ำกว่า Baseline จะนับเป็น 0",
-        `คำนวณจาก ${formatNumber(summary.comparableSites)} โครงการ`
+        "ตัวเลขนี้บอกว่าวันที่กำลังดู มีโครงการกี่เปอร์เซ็นต์ที่ขึ้นราคาถึงเป้า 300 บาทขึ้นไป",
+        "นับเฉพาะโครงการที่มีทั้งราคา Baseline และราคาของวันนั้น จึงเปรียบเทียบได้จริง",
+        "สูตร: จำนวนโครงการที่ราคาเพิ่มขึ้นตั้งแต่ 300 บาทขึ้นไป / จำนวนโครงการที่เปรียบเทียบได้ทั้งหมด x 100",
+        `ตอนนี้คือ ${formatNumber(targetHitSites)} จาก ${formatNumber(summary.comparableSites)} โครงการ`,
+        `ข้อมูลที่ใช้คำนวณคือ ${summaryDateRange}`
       ]
     },
     proportionChart: {
-      title: "% สัดส่วนโครงการตามระดับการขึ้นราคา คำนวณยังไง",
+      title: "% สัดส่วนตามราคา อ่านยังไง",
       lines: [
-        "แต่ละแท่งคือ 1 วัน และรวมเป็น 100%",
-        "กราฟนี้นับจำนวนโครงการ ไม่ได้ถ่วงด้วยยอดขายหรือ SUMQ",
-        "สูตรแต่ละสี: จำนวนโครงการในช่วงราคานั้นของวัน หารด้วย จำนวนโครงการทั้งหมดที่มีข้อมูลในวันนั้น แล้วคูณ 100",
-        "ช่วงราคามาจากราคาที่เพิ่มขึ้น เช่น 0-99, 100-199, 200-299, 300-399, 400-499, 500+"
+        "กราฟนี้ตอบว่าในแต่ละวัน โครงการกระจายอยู่ในช่วงราคาเพิ่มขึ้นช่วงไหนบ้าง",
+        "หนึ่งแท่งคือหนึ่งวัน และทุกสีในแท่งรวมกันเป็น 100%",
+        "กราฟนี้นับจำนวนโครงการเป็นหลัก ไม่ได้ถ่วงด้วยปริมาณขาย",
+        "ตัวอย่างเช่น สี 300-399 หมายถึงสัดส่วนโครงการที่ราคาวันนั้นสูงกว่า Baseline 300-399 บาท",
+        "สีเทา 'ไม่มี baseline' คือโครงการที่มีข้อมูลวันนั้น แต่ไม่มีข้อมูลช่วง 1-24 มี.ค. จึงยังเปรียบเทียบราคาไม่ได้"
+      ]
+    },
+    discountDropChart: {
+      title: "% สัดส่วน Disc ที่ลดลง อ่านยังไง",
+      lines: [
+        "กราฟนี้ดูว่าส่วนลดเฉลี่ยของโครงการลดลงจากช่วง Baseline มากแค่ไหน",
+        "คำนวณทีละโครงการ: % Disc ที่ลดลง = (Disc Baseline - Disc วันนั้น) / Disc Baseline x 100",
+        "ถ้า Disc วันนั้นไม่ได้ลดลง หรือสูงกว่า Baseline จะนับเป็น 0%",
+        "จากนั้นจัดกลุ่มเป็นช่วง 0-2.9%, 3.0-5.9%, 6.0-8.9%, 9.0-11.9%, 12.0-14.9%, และ 15% ขึ้นไป",
+        "สีเทา 'ไม่มี baseline' คือโครงการที่ไม่มี Disc Baseline ให้เปรียบเทียบ"
       ]
     },
     averageTrend: {
-      title: "ค่าเฉลี่ยการขึ้นราคาเทียบ Baseline รายวัน คำนวณยังไง",
+      title: "ค่าเฉลี่ยการขึ้นราคารายวัน อ่านยังไง",
       lines: [
-        "แต่ละจุดคือค่าเพิ่มราคาเฉลี่ยรายวันแบบถ่วงน้ำหนักด้วย SUMQ",
-        "สูตร: ผลรวมของ (ราคาที่เพิ่มขึ้นของวัน x ปริมาณขายของวัน) หารด้วย ผลรวมปริมาณขายของวัน",
-        "ราคาที่เพิ่มขึ้นของแต่ละโครงการ = ราคาขายรายวัน - ราคา Baseline และถ้าต่ำกว่า Baseline จะนับเป็น 0"
+        "กราฟเส้นนี้แสดงราคาเพิ่มเฉลี่ยของแต่ละวัน เพื่อดูแนวโน้มว่าราคาเพิ่มขึ้นมากขึ้นหรือลดลง",
+        "แต่ละจุดใช้สูตรเดียวกับ Total increase: SUM(ราคาเพิ่มขึ้น x SUMQ) / SUM(SUMQ)",
+        "ราคาเพิ่มขึ้นของแต่ละโครงการ = ราคา NP_AVG ของวันนั้น - ราคา Baseline",
+        "ถ้าราคาวันนั้นต่ำกว่า Baseline จะนับเป็น 0",
+        "เมื่อเลือก Division หรือ Segment กราฟนี้จะคำนวณใหม่เฉพาะกลุ่มที่เลือก"
       ]
     },
     projectTrend: {
-      title: "กราฟรายโครงการ คำนวณยังไง",
+      title: "Project trend อ่านยังไง",
       lines: [
-        "กราฟนี้คำนวณเฉพาะโครงการที่เลือกจากตาราง",
-        "ราคาขายรายวัน = ผลรวมของ (NP_AVG x SUMQ) หารด้วย ผลรวม SUMQ",
-        "ราคาที่เพิ่มขึ้น = ราคาขายรายวัน - ราคา Baseline ของโครงการเดียวกัน และถ้าต่ำกว่า Baseline จะนับเป็น 0"
+        "กราฟนี้แสดงเฉพาะโครงการที่คลิกเลือกจากตาราง เพื่อดูการเปลี่ยนแปลงของโครงการนั้นรายวัน",
+        "เส้นราคาขายคือราคา NP_AVG รายวันของโครงการนั้น โดยถ่วงน้ำหนักด้วย SUMQ ถ้าวันนั้นมีหลาย record",
+        "เส้นขึ้นราคาคือราคาขายรายวัน - ราคา Baseline ของโครงการเดียวกัน",
+        "ถ้าราคาขายรายวันต่ำกว่า Baseline จะนับการขึ้นราคาเป็น 0",
+        "กราฟรายโครงการแสดงข้อมูลตั้งแต่ 1 มี.ค. เป็นต้นไปเท่าที่โครงการนั้นมีข้อมูล"
       ]
     },
     projectTable: {
-      title: "ตารางโครงการ คำนวณยังไง",
+      title: "Project table อ่านยังไง",
       lines: [
-        "ราคา Baseline = ผลรวมของ (NP_AVG x SUMQ) หารด้วย ผลรวม SUMQ ในช่วงวันที่ 1-24 มี.ค.",
-        "ราคาปัจจุบัน = ราคาของวันที่เลือก หรือราคาล่าสุดของโครงการถ้ายังไม่ได้เลือกวัน",
-        "ราคาที่เพิ่มขึ้น = ราคาปัจจุบัน - ราคา Baseline และถ้าต่ำกว่า Baseline จะนับเป็น 0",
-        "% เทียบเป้า 300 = ราคาที่เพิ่มขึ้น หารด้วย 300 แล้วคูณ 100",
-        `จำนวนโครงการด้านบนตารางคือจำนวนโครงการหลังใช้ filter ทั้งหมด ตารางแสดงทีละ ${formatNumber(PAGE_SIZE)} รายการต่อหน้า`
+        "ตารางนี้แสดงรายละเอียดรายโครงการหลังใช้ตัวกรอง เช่น วันที่, Division, Segment และ Ladder",
+        "Baseline คือราคาอ้างอิงของโครงการ คำนวณจาก NP_AVG เฉลี่ยถ่วง SUMQ ช่วง 1-24 มี.ค.",
+        "Current คือราคา NP_AVG ของวันที่เลือก ถ้าไม่ได้เลือกวันจะใช้ราคาล่าสุดของแต่ละโครงการ",
+        "Increase vs Baseline = Current - Baseline และถ้าติดลบจะนับเป็น 0",
+        "% of 300 Target = Increase vs Baseline / 300 x 100 เช่น 150 บาท = 50%",
+        `ตารางแสดงทีละ ${formatNumber(PAGE_SIZE)} รายการต่อหน้า จากจำนวนโครงการที่ผ่านตัวกรองทั้งหมด`
       ]
     }
   };
@@ -930,6 +1017,13 @@ export function App() {
             ใช้ NP_AVG เป็น net price เพื่อนำไปเทียบกับ Baseline
             {" "}ซึ่งอ้างอิงช่วง {meta.config.baselineStart} ถึง {meta.config.baselineEnd}
             {" "}และติดตามผลตั้งแต่ {meta.config.campaignStart} เป็นต้นไป
+            <button
+              type="button"
+              className="baselineHelpButton"
+              onClick={() => setActiveCalcHelp("baselineDefinition")}
+            >
+              ระบบคำนวณ Baseline
+            </button>
           </p>
         </div>
       </header>
@@ -950,14 +1044,6 @@ export function App() {
           <span>Average to target</span>
           <strong>{formatPercent(targetHitShare)}</strong>
           <p>สัดส่วนโครงการที่ขึ้นถึง 300 บาท B/C ขึ้นไป {summaryDateRange}</p>
-        </article>
-        <article className="statCard">
-          <button type="button" className="calcHelpButton" onClick={() => setActiveCalcHelp("highestIncrease")}>
-            วิธีคำนวณ
-          </button>
-          <span>ขึ้นจาก Baseline สูงสุด</span>
-          <strong>{formatNumber(summary.maxIncrease)} บาท</strong>
-          <p>โครงการที่เพิ่มราคาจาก baseline มากที่สุด</p>
         </article>
       </section>
 
@@ -1063,8 +1149,89 @@ export function App() {
                     ];
                   }}
                 />
-                <Legend />
+                <Legend
+                  content={() => (
+                    <div className="customChartLegend">
+                      {trendBucketSeries.map((series) => (
+                        <span key={series.shareKey}>
+                          <i style={{ backgroundColor: series.fill }} />
+                          {series.name}
+                        </span>
+                      ))}
+                    </div>
+                  )}
+                />
                 {trendBucketSeries.map((series) => (
+                  <Bar
+                    key={series.shareKey}
+                    dataKey={series.shareKey}
+                    stackId="share"
+                    fill={series.fill}
+                    name={series.name}
+                  >
+                    <LabelList dataKey={series.shareKey} content={renderPercentBarLabel} />
+                  </Bar>
+                ))}
+              </BarChart>
+            </ResponsiveContainer>
+          </div>
+        </article>
+
+        <article className="panel chartPanel">
+          <div className="panelHeader">
+            <div>
+              <h2>% สัดส่วน Disc ที่ลดลง</h2>
+              <p>
+                เทียบ Disc Baseline กับ Disc ณ วันนั้น โดยแบ่งช่วงลดลงทีละ 3%
+                และแสดงโครงการที่ไม่มี baseline เป็นสีเทา
+              </p>
+            </div>
+            <div className="chartSummaryPills">
+              <button type="button" className="calcHelpButton compact" onClick={() => setActiveCalcHelp("discountDropChart")}>
+                วิธีคำนวณ
+              </button>
+            </div>
+          </div>
+
+          <div className="chartWrap proportionChart">
+            <ResponsiveContainer width="100%" height="100%">
+              <BarChart data={proportionTrendData} barCategoryGap="10%">
+                <CartesianGrid strokeDasharray="3 3" stroke="#2f3e65" />
+                <XAxis dataKey="day" tickFormatter={formatShortDate} stroke="#9fb0d0" />
+                <YAxis
+                  domain={[0, 100]}
+                  tickFormatter={formatPercentTick}
+                  stroke="#9fb0d0"
+                />
+                <Tooltip
+                  labelFormatter={(label, payload) => {
+                    const point = payload?.[0]?.payload as ShareTrendPoint | undefined;
+                    return `${formatThaiDateShort(String(label))}${
+                      point ? ` • ${formatNumber(point.siteCount)} โครงการ` : ""
+                    }`;
+                  }}
+                  formatter={(value, name, item) => {
+                    const countKey = String(item.dataKey).replace("Share", "") as keyof ShareTrendPoint;
+                    const point = item.payload as ShareTrendPoint;
+                    return [
+                      `${formatNumber(Number(value))}% (${formatNumber(Number(point[countKey] ?? 0))} โครงการ)`,
+                      String(name)
+                    ];
+                  }}
+                />
+                <Legend
+                  content={() => (
+                    <div className="customChartLegend">
+                      {discountDropSeries.map((series) => (
+                        <span key={series.shareKey}>
+                          <i style={{ backgroundColor: series.fill }} />
+                          {series.name}
+                        </span>
+                      ))}
+                    </div>
+                  )}
+                />
+                {discountDropSeries.map((series) => (
                   <Bar
                     key={series.shareKey}
                     dataKey={series.shareKey}

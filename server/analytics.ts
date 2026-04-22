@@ -35,17 +35,35 @@ export type PricingRecord = {
 export type TrendPoint = {
   day: string;
   siteCount: number;
+  noBaseline: number;
   ladder500: number;
   ladder400: number;
   ladder300: number;
+  ladder250: number;
   ladder200: number;
   ladder100: number;
   ladder0: number;
+  volumeTotal: number;
+  volumeNoBaseline: number;
+  volumeLadder500: number;
+  volumeLadder400: number;
+  volumeLadder300: number;
+  volumeLadder250: number;
+  volumeLadder200: number;
+  volumeLadder100: number;
+  volumeLadder0: number;
+  disc0: number;
+  disc3: number;
+  disc6: number;
+  disc9: number;
+  disc12: number;
+  disc15: number;
   avgIncrease: number;
   avgTargetPercent: number;
   moveInto500: number;
   moveInto400: number;
   moveInto300: number;
+  moveInto250: number;
   moveInto200: number;
   moveInto100: number;
   moveInto0: number;
@@ -108,6 +126,7 @@ type SummaryStats = {
   ladder500: number;
   ladder400: number;
   ladder300: number;
+  ladder250: number;
   ladder200: number;
   ladder100: number;
   ladder0: number;
@@ -157,19 +176,23 @@ function round2(value: number) {
 
 function getLadder(increaseAmount: number) {
   if (increaseAmount >= 500) {
-    return { label: "500+", rank: 6 };
+    return { label: "500+", rank: 7 };
   }
 
   if (increaseAmount >= 400) {
-    return { label: "400-499", rank: 5 };
+    return { label: "400-499", rank: 6 };
   }
 
   if (increaseAmount >= 300) {
-    return { label: "300-399", rank: 4 };
+    return { label: "300-399", rank: 5 };
+  }
+
+  if (increaseAmount >= 250) {
+    return { label: "250-299", rank: 4 };
   }
 
   if (increaseAmount >= 200) {
-    return { label: "200-299", rank: 3 };
+    return { label: "200-249", rank: 3 };
   }
 
   if (increaseAmount >= 100) {
@@ -177,6 +200,20 @@ function getLadder(increaseAmount: number) {
   }
 
   return { label: "0-99", rank: 1 };
+}
+
+type DiscountDropKey = "disc0" | "disc3" | "disc6" | "disc9" | "disc12" | "disc15";
+
+function getDiscountDropBucket(baselineDisc: number, postDisc: number): DiscountDropKey {
+  const dropPercent =
+    baselineDisc > 0 ? Math.max(((baselineDisc - postDisc) / baselineDisc) * 100, 0) : 0;
+
+  if (dropPercent >= 15) return "disc15";
+  if (dropPercent >= 12) return "disc12";
+  if (dropPercent >= 9) return "disc9";
+  if (dropPercent >= 6) return "disc6";
+  if (dropPercent >= 3) return "disc3";
+  return "disc0";
 }
 
 function safeString(value: string | null) {
@@ -205,7 +242,8 @@ function summarizeProjects(rows: ProjectRow[]): SummaryStats {
     ladder500: rows.filter((row) => row.ladder === "500+").length,
     ladder400: rows.filter((row) => row.ladder === "400-499").length,
     ladder300: rows.filter((row) => row.ladder === "300-399").length,
-    ladder200: rows.filter((row) => row.ladder === "200-299").length,
+    ladder250: rows.filter((row) => row.ladder === "250-299").length,
+    ladder200: rows.filter((row) => row.ladder === "200-249").length,
     ladder100: rows.filter((row) => row.ladder === "100-199").length,
     ladder0: rows.filter((row) => row.ladder === "0-99").length,
     belowTargetSites: rows.filter((row) => row.increaseAmount < TARGET_INCREASE).length,
@@ -310,7 +348,7 @@ export function buildAnalytics(records: PricingRecord[]): AnalyticsBundle {
       baselineAccumulator.set(siteNo, current);
     }
 
-    if (dpDate.date >= campaignStart) {
+    if (dpDate.date >= baselineStart) {
       const key = `${siteNo}__${dpDate.raw}`;
       const current = postAccumulator.get(key) ?? {
         siteNo,
@@ -367,6 +405,7 @@ export function buildAnalytics(records: PricingRecord[]): AnalyticsBundle {
   }
 
   const postRows: PostDailyRow[] = [];
+  const projectTrendMap = new Map<string, ProjectTrendRow[]>();
 
   for (const value of postAccumulator.values()) {
     const baseline = baselineMap.get(value.siteNo);
@@ -380,6 +419,22 @@ export function buildAnalytics(records: PricingRecord[]): AnalyticsBundle {
     const increaseAmount = Math.max(rawIncreaseAmount, 0);
     const targetPercent = (increaseAmount / TARGET_INCREASE) * 100;
     const ladder = getLadder(increaseAmount);
+    const projectTrend = projectTrendMap.get(value.siteNo) ?? [];
+    projectTrend.push({
+      siteNo: value.siteNo,
+      siteName: baseline.siteName || value.siteName,
+      day: value.day,
+      baselineNetPrice: round2(baseline.baselineNetPrice),
+      postNetPrice: round2(postNetPrice),
+      increaseAmount: round2(increaseAmount),
+      targetPercent: round2(targetPercent),
+      ladder: ladder.label
+    });
+    projectTrendMap.set(value.siteNo, projectTrend);
+
+    if (value.day < CAMPAIGN_START) {
+      continue;
+    }
 
     postRows.push({
       siteNo: value.siteNo,
@@ -411,70 +466,154 @@ export function buildAnalytics(records: PricingRecord[]): AnalyticsBundle {
     return a.siteNo.localeCompare(b.siteNo);
   });
 
+  for (const rows of projectTrendMap.values()) {
+    rows.sort((a, b) => a.day.localeCompare(b.day));
+  }
+
   const latestBySite = new Map<string, PostDailyRow>();
   const trendByDay = new Map<
     string,
     {
       day: string;
       siteCount: number;
+      noBaseline: number;
       ladder500: number;
       ladder400: number;
       ladder300: number;
+      ladder250: number;
       ladder200: number;
       ladder100: number;
       ladder0: number;
+      volumeTotal: number;
+      volumeNoBaseline: number;
+      volumeLadder500: number;
+      volumeLadder400: number;
+      volumeLadder300: number;
+      volumeLadder250: number;
+      volumeLadder200: number;
+      volumeLadder100: number;
+      volumeLadder0: number;
+      disc0: number;
+      disc3: number;
+      disc6: number;
+      disc9: number;
+      disc12: number;
+      disc15: number;
       avgIncreaseTotal: number;
       avgTargetPercentTotal: number;
       weightedIncreaseTotal: number;
-      postVolumeTotal: number;
+      comparableVolumeTotal: number;
+      comparableSiteCount: number;
       moveInto500: number;
       moveInto400: number;
       moveInto300: number;
+      moveInto250: number;
       moveInto200: number;
       moveInto100: number;
       moveInto0: number;
     }
   >();
-  const projectTrendMap = new Map<string, ProjectTrendRow[]>();
+
+  const createTrendBucket = (day: string) => ({
+    day,
+    siteCount: 0,
+    noBaseline: 0,
+    ladder500: 0,
+    ladder400: 0,
+    ladder300: 0,
+    ladder250: 0,
+    ladder200: 0,
+    ladder100: 0,
+    ladder0: 0,
+    volumeTotal: 0,
+    volumeNoBaseline: 0,
+    volumeLadder500: 0,
+    volumeLadder400: 0,
+    volumeLadder300: 0,
+    volumeLadder250: 0,
+    volumeLadder200: 0,
+    volumeLadder100: 0,
+    volumeLadder0: 0,
+    disc0: 0,
+    disc3: 0,
+    disc6: 0,
+    disc9: 0,
+    disc12: 0,
+    disc15: 0,
+    avgIncreaseTotal: 0,
+    avgTargetPercentTotal: 0,
+    weightedIncreaseTotal: 0,
+    comparableVolumeTotal: 0,
+    comparableSiteCount: 0,
+    moveInto500: 0,
+    moveInto400: 0,
+    moveInto300: 0,
+    moveInto250: 0,
+    moveInto200: 0,
+    moveInto100: 0,
+    moveInto0: 0
+  });
+
+  for (const value of postAccumulator.values()) {
+    if (value.day < CAMPAIGN_START || value.totalVolume <= 0) {
+      continue;
+    }
+
+    const dayBucket = trendByDay.get(value.day) ?? createTrendBucket(value.day);
+    dayBucket.siteCount += 1;
+    dayBucket.volumeTotal += value.totalVolume;
+
+    if (!baselineMap.has(value.siteNo)) {
+      dayBucket.noBaseline += 1;
+      dayBucket.volumeNoBaseline += value.totalVolume;
+    }
+
+    trendByDay.set(value.day, dayBucket);
+  }
 
   const previousBySite = new Map<string, number>();
 
   for (const row of postRows) {
     latestBySite.set(row.siteNo, row);
 
-    const dayBucket = trendByDay.get(row.day) ?? {
-      day: row.day,
-      siteCount: 0,
-      ladder500: 0,
-      ladder400: 0,
-      ladder300: 0,
-      ladder200: 0,
-      ladder100: 0,
-      ladder0: 0,
-      avgIncreaseTotal: 0,
-      avgTargetPercentTotal: 0,
-      weightedIncreaseTotal: 0,
-      postVolumeTotal: 0,
-      moveInto500: 0,
-      moveInto400: 0,
-      moveInto300: 0,
-      moveInto200: 0,
-      moveInto100: 0,
-      moveInto0: 0
-    };
+    const dayBucket = trendByDay.get(row.day) ?? createTrendBucket(row.day);
 
-    dayBucket.siteCount += 1;
+    if (dayBucket.siteCount === 0) {
+      dayBucket.siteCount += 1;
+      dayBucket.volumeTotal += row.postVolume;
+    }
+
+    dayBucket.comparableSiteCount += 1;
     dayBucket.avgIncreaseTotal += row.increaseAmount;
     dayBucket.avgTargetPercentTotal += row.targetPercent;
     dayBucket.weightedIncreaseTotal += row.increaseAmount * row.postVolume;
-    dayBucket.postVolumeTotal += row.postVolume;
+    dayBucket.comparableVolumeTotal += row.postVolume;
 
-    if (row.ladder === "500+") dayBucket.ladder500 += 1;
-    else if (row.ladder === "400-499") dayBucket.ladder400 += 1;
-    else if (row.ladder === "300-399") dayBucket.ladder300 += 1;
-    else if (row.ladder === "200-299") dayBucket.ladder200 += 1;
-    else if (row.ladder === "100-199") dayBucket.ladder100 += 1;
-    else dayBucket.ladder0 += 1;
+    if (row.ladder === "500+") {
+      dayBucket.ladder500 += 1;
+      dayBucket.volumeLadder500 += row.postVolume;
+    } else if (row.ladder === "400-499") {
+      dayBucket.ladder400 += 1;
+      dayBucket.volumeLadder400 += row.postVolume;
+    } else if (row.ladder === "300-399") {
+      dayBucket.ladder300 += 1;
+      dayBucket.volumeLadder300 += row.postVolume;
+    } else if (row.ladder === "250-299") {
+      dayBucket.ladder250 += 1;
+      dayBucket.volumeLadder250 += row.postVolume;
+    } else if (row.ladder === "200-249") {
+      dayBucket.ladder200 += 1;
+      dayBucket.volumeLadder200 += row.postVolume;
+    } else if (row.ladder === "100-199") {
+      dayBucket.ladder100 += 1;
+      dayBucket.volumeLadder100 += row.postVolume;
+    } else {
+      dayBucket.ladder0 += 1;
+      dayBucket.volumeLadder0 += row.postVolume;
+    }
+
+    const discountBucket = getDiscountDropBucket(row.baselineDisc, row.postDisc);
+    dayBucket[discountBucket] += 1;
 
     const previousRank = previousBySite.get(row.siteNo);
     const movedUp = previousRank === undefined || row.ladderRank > previousRank;
@@ -482,7 +621,8 @@ export function buildAnalytics(records: PricingRecord[]): AnalyticsBundle {
       if (row.ladder === "500+") dayBucket.moveInto500 += 1;
       else if (row.ladder === "400-499") dayBucket.moveInto400 += 1;
       else if (row.ladder === "300-399") dayBucket.moveInto300 += 1;
-      else if (row.ladder === "200-299") dayBucket.moveInto200 += 1;
+      else if (row.ladder === "250-299") dayBucket.moveInto250 += 1;
+      else if (row.ladder === "200-249") dayBucket.moveInto200 += 1;
       else if (row.ladder === "100-199") dayBucket.moveInto100 += 1;
       else dayBucket.moveInto0 += 1;
     }
@@ -490,18 +630,6 @@ export function buildAnalytics(records: PricingRecord[]): AnalyticsBundle {
     previousBySite.set(row.siteNo, row.ladderRank);
     trendByDay.set(row.day, dayBucket);
 
-    const projectTrend = projectTrendMap.get(row.siteNo) ?? [];
-    projectTrend.push({
-      siteNo: row.siteNo,
-      siteName: row.siteName,
-      day: row.day,
-      baselineNetPrice: round2(row.baselineNetPrice),
-      postNetPrice: round2(row.postNetPrice),
-      increaseAmount: round2(row.increaseAmount),
-      targetPercent: round2(row.targetPercent),
-      ladder: row.ladder
-    });
-    projectTrendMap.set(row.siteNo, projectTrend);
   }
 
   const trend = [...trendByDay.values()]
@@ -509,21 +637,45 @@ export function buildAnalytics(records: PricingRecord[]): AnalyticsBundle {
     .map((bucket) => ({
       day: bucket.day,
       siteCount: bucket.siteCount,
+      noBaseline: bucket.noBaseline,
       ladder500: bucket.ladder500,
       ladder400: bucket.ladder400,
       ladder300: bucket.ladder300,
+      ladder250: bucket.ladder250,
       ladder200: bucket.ladder200,
       ladder100: bucket.ladder100,
       ladder0: bucket.ladder0,
+      volumeTotal: round2(bucket.volumeTotal),
+      volumeNoBaseline: round2(bucket.volumeNoBaseline),
+      volumeLadder500: round2(bucket.volumeLadder500),
+      volumeLadder400: round2(bucket.volumeLadder400),
+      volumeLadder300: round2(bucket.volumeLadder300),
+      volumeLadder250: round2(bucket.volumeLadder250),
+      volumeLadder200: round2(bucket.volumeLadder200),
+      volumeLadder100: round2(bucket.volumeLadder100),
+      volumeLadder0: round2(bucket.volumeLadder0),
+      disc0: bucket.disc0,
+      disc3: bucket.disc3,
+      disc6: bucket.disc6,
+      disc9: bucket.disc9,
+      disc12: bucket.disc12,
+      disc15: bucket.disc15,
       avgIncrease: round2(
-        bucket.postVolumeTotal > 0
-          ? bucket.weightedIncreaseTotal / bucket.postVolumeTotal
-          : bucket.avgIncreaseTotal / bucket.siteCount
+        bucket.comparableVolumeTotal > 0
+          ? bucket.weightedIncreaseTotal / bucket.comparableVolumeTotal
+          : bucket.comparableSiteCount
+            ? bucket.avgIncreaseTotal / bucket.comparableSiteCount
+            : 0
       ),
-      avgTargetPercent: round2(bucket.avgTargetPercentTotal / bucket.siteCount),
+      avgTargetPercent: round2(
+        bucket.comparableSiteCount
+          ? bucket.avgTargetPercentTotal / bucket.comparableSiteCount
+          : 0
+      ),
       moveInto500: bucket.moveInto500,
       moveInto400: bucket.moveInto400,
       moveInto300: bucket.moveInto300,
+      moveInto250: bucket.moveInto250,
       moveInto200: bucket.moveInto200,
       moveInto100: bucket.moveInto100,
       moveInto0: bucket.moveInto0

@@ -69,7 +69,8 @@ post_vs_baseline AS (
       WHEN (p.postNetPrice - b.baselineNetPrice) >= 500 THEN '500+'
       WHEN (p.postNetPrice - b.baselineNetPrice) >= 400 THEN '400-499'
       WHEN (p.postNetPrice - b.baselineNetPrice) >= 300 THEN '300-399'
-      WHEN (p.postNetPrice - b.baselineNetPrice) >= 200 THEN '200-299'
+      WHEN (p.postNetPrice - b.baselineNetPrice) >= 250 THEN '250-299'
+      WHEN (p.postNetPrice - b.baselineNetPrice) >= 200 THEN '200-249'
       WHEN (p.postNetPrice - b.baselineNetPrice) >= 100 THEN '100-199'
       ELSE '0-99'
     END AS ladder
@@ -99,7 +100,8 @@ SELECT
   SUM(CASE WHEN ladder = '500+' THEN 1 ELSE 0 END) AS ladder500,
   SUM(CASE WHEN ladder = '400-499' THEN 1 ELSE 0 END) AS ladder400,
   SUM(CASE WHEN ladder = '300-399' THEN 1 ELSE 0 END) AS ladder300,
-  SUM(CASE WHEN ladder = '200-299' THEN 1 ELSE 0 END) AS ladder200,
+  SUM(CASE WHEN ladder = '250-299' THEN 1 ELSE 0 END) AS ladder250,
+  SUM(CASE WHEN ladder = '200-249' THEN 1 ELSE 0 END) AS ladder200,
   SUM(CASE WHEN ladder = '100-199' THEN 1 ELSE 0 END) AS ladder100,
   SUM(CASE WHEN ladder = '0-99' THEN 1 ELSE 0 END) AS ladder0,
   SUM(CASE WHEN increaseAmount < 300 THEN 1 ELSE 0 END) AS belowTargetSites,
@@ -130,19 +132,21 @@ movement_base AS (
     CASE ladder
       WHEN '0-99' THEN 1
       WHEN '100-199' THEN 2
-      WHEN '200-299' THEN 3
-      WHEN '300-399' THEN 4
-      WHEN '400-499' THEN 5
-      WHEN '500+' THEN 6
+      WHEN '200-249' THEN 3
+      WHEN '250-299' THEN 4
+      WHEN '300-399' THEN 5
+      WHEN '400-499' THEN 6
+      WHEN '500+' THEN 7
     END AS ladderRank,
     LAG(
       CASE ladder
         WHEN '0-99' THEN 1
         WHEN '100-199' THEN 2
-        WHEN '200-299' THEN 3
-        WHEN '300-399' THEN 4
-        WHEN '400-499' THEN 5
-        WHEN '500+' THEN 6
+        WHEN '200-249' THEN 3
+        WHEN '250-299' THEN 4
+        WHEN '300-399' THEN 5
+        WHEN '400-499' THEN 6
+        WHEN '500+' THEN 7
       END
     ) OVER (PARTITION BY siteNo ORDER BY day) AS previousLadderRank
   FROM post_vs_baseline
@@ -153,7 +157,8 @@ SELECT
   SUM(CASE WHEN pvb.ladder = '500+' THEN 1 ELSE 0 END) AS ladder500,
   SUM(CASE WHEN pvb.ladder = '400-499' THEN 1 ELSE 0 END) AS ladder400,
   SUM(CASE WHEN pvb.ladder = '300-399' THEN 1 ELSE 0 END) AS ladder300,
-  SUM(CASE WHEN pvb.ladder = '200-299' THEN 1 ELSE 0 END) AS ladder200,
+  SUM(CASE WHEN pvb.ladder = '250-299' THEN 1 ELSE 0 END) AS ladder250,
+  SUM(CASE WHEN pvb.ladder = '200-249' THEN 1 ELSE 0 END) AS ladder200,
   SUM(CASE WHEN pvb.ladder = '100-199' THEN 1 ELSE 0 END) AS ladder100,
   SUM(CASE WHEN pvb.ladder = '0-99' THEN 1 ELSE 0 END) AS ladder0,
   ROUND(SUM(pvb.increaseAmount * pvb.postVolume) / NULLIF(SUM(pvb.postVolume), 0), 2) AS avgIncrease,
@@ -181,7 +186,14 @@ SELECT
   ) AS moveInto300,
   SUM(
     CASE
-      WHEN mb.ladder = '200-299'
+      WHEN mb.ladder = '250-299'
+       AND (mb.previousLadderRank IS NULL OR mb.ladderRank > mb.previousLadderRank)
+      THEN 1 ELSE 0
+    END
+  ) AS moveInto250,
+  SUM(
+    CASE
+      WHEN mb.ladder = '200-249'
        AND (mb.previousLadderRank IS NULL OR mb.ladderRank > mb.previousLadderRank)
       THEN 1 ELSE 0
     END

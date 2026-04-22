@@ -68,6 +68,27 @@ select {
   text-wrap: balance;
 }
 
+.baselineHelpButton {
+  display: inline-flex;
+  align-items: center;
+  margin: 0 0 0 10px;
+  border: 1px solid rgba(128, 221, 255, 0.32);
+  background: rgba(9, 22, 42, 0.64);
+  color: #dce8ff;
+  border-radius: 999px;
+  padding: 6px 12px;
+  cursor: pointer;
+  font-size: 0.86rem;
+  font-weight: 700;
+  vertical-align: baseline;
+  white-space: nowrap;
+}
+
+.baselineHelpButton:hover {
+  border-color: rgba(128, 221, 255, 0.62);
+  background: rgba(53, 98, 168, 0.42);
+}
+
 .statCard,
 .panel {
   background: rgba(8, 20, 38, 0.74);
@@ -104,7 +125,7 @@ select {
 }
 
 .gridStats {
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-template-columns: repeat(2, minmax(0, 1fr));
 }
 
 .statCard p {
@@ -414,6 +435,40 @@ select {
 
 .lineInsightChart {
   height: 320px;
+}
+
+.customChartLegend {
+  display: flex;
+  justify-content: center;
+  gap: 14px;
+  flex-wrap: wrap;
+  color: #bfd0ef;
+  font-size: 0.9rem;
+  font-weight: 700;
+}
+
+.customChartLegend span {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  white-space: nowrap;
+}
+
+.customChartLegend i {
+  display: inline-block;
+  width: 14px;
+  height: 10px;
+}
+
+.recharts-default-tooltip {
+  border: 1px solid rgba(123, 157, 214, 0.28) !important;
+  background: rgba(248, 251, 255, 0.96) !important;
+  box-shadow: 0 18px 36px rgba(2, 8, 20, 0.3) !important;
+}
+
+.recharts-tooltip-label {
+  color: #1d2a3f !important;
+  font-weight: 800 !important;
 }
 
 .twoColumn {
