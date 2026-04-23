@@ -159,6 +159,7 @@ type AnalyticsBundle = {
 const baselineStart = new Date(BASELINE_START);
 const baselineEnd = new Date(BASELINE_END);
 const campaignStart = new Date(CAMPAIGN_START);
+const NO_BASELINE_LADDER = "ไม่มี baseline";
 
 function toDateOnly(value: string | null) {
   if (!value) {
@@ -294,6 +295,11 @@ export function buildAnalytics(records: PricingRecord[]): AnalyticsBundle {
       siteNo: string;
       siteName: string;
       day: string;
+      divisionName: string;
+      fcName: string;
+      sectName: string;
+      segment: string;
+      channel: string;
       priceWeightedTotal: number;
       discountWeightedTotal: number;
       recordCount: number;
@@ -354,6 +360,11 @@ export function buildAnalytics(records: PricingRecord[]): AnalyticsBundle {
         siteNo,
         siteName: safeString(record.SITE_NAME),
         day: dpDate.raw,
+        divisionName: safeString(record.DIVISION_NAME),
+        fcName: safeString(record.FC_NAME),
+        sectName: safeString(record.SECT_NAME),
+        segment: safeString(record.SEGMENT),
+        channel: safeString(record.CHANNEL),
         priceWeightedTotal: 0,
         discountWeightedTotal: 0,
         recordCount: 0,
@@ -406,10 +417,54 @@ export function buildAnalytics(records: PricingRecord[]): AnalyticsBundle {
 
   const postRows: PostDailyRow[] = [];
   const projectTrendMap = new Map<string, ProjectTrendRow[]>();
+  const noBaselineDailyProjects: ProjectRow[] = [];
+  const noBaselineLatestBySite = new Map<string, ProjectRow>();
 
   for (const value of postAccumulator.values()) {
     const baseline = baselineMap.get(value.siteNo);
     if (!baseline || value.totalVolume <= 0) {
+      if (!baseline && value.totalVolume > 0 && value.day >= CAMPAIGN_START) {
+        const postNetPrice = value.priceWeightedTotal / value.totalVolume;
+        const postDisc = value.discountWeightedTotal / value.totalVolume;
+        const noBaselineRow = {
+          siteNo: value.siteNo,
+          siteName: value.siteName,
+          divisionName: value.divisionName,
+          fcName: value.fcName,
+          sectName: value.sectName,
+          segment: value.segment,
+          channel: value.channel,
+          latestDay: value.day,
+          baselineNetPrice: 0,
+          currentNetPrice: round2(postNetPrice),
+          baselineDisc: 0,
+          currentDisc: round2(postDisc),
+          increaseAmount: 0,
+          targetPercent: 0,
+          ladder: NO_BASELINE_LADDER,
+          baselineVolume: 0,
+          postVolume: round2(value.totalVolume)
+        };
+        const projectTrend = projectTrendMap.get(value.siteNo) ?? [];
+        projectTrend.push({
+          siteNo: value.siteNo,
+          siteName: value.siteName,
+          day: value.day,
+          baselineNetPrice: 0,
+          postNetPrice: round2(postNetPrice),
+          increaseAmount: 0,
+          targetPercent: 0,
+          ladder: NO_BASELINE_LADDER
+        });
+        projectTrendMap.set(value.siteNo, projectTrend);
+        noBaselineDailyProjects.push(noBaselineRow);
+
+        const previousLatest = noBaselineLatestBySite.get(value.siteNo);
+        if (!previousLatest || value.day.localeCompare(previousLatest.latestDay) > 0) {
+          noBaselineLatestBySite.set(value.siteNo, noBaselineRow);
+        }
+      }
+
       continue;
     }
 
@@ -681,7 +736,7 @@ export function buildAnalytics(records: PricingRecord[]): AnalyticsBundle {
       moveInto0: bucket.moveInto0
     }));
 
-  const projects = [...latestBySite.values()]
+  const comparableProjects = [...latestBySite.values()]
     .map((row) => ({
       siteNo: row.siteNo,
       siteName: row.siteName,
@@ -709,7 +764,7 @@ export function buildAnalytics(records: PricingRecord[]): AnalyticsBundle {
       return a.increaseAmount - b.increaseAmount;
     });
 
-  const dailyProjects = postRows
+  const comparableDailyProjects = postRows
     .map((row) => ({
       siteNo: row.siteNo,
       siteName: row.siteName,
@@ -740,9 +795,27 @@ export function buildAnalytics(records: PricingRecord[]): AnalyticsBundle {
 
       return a.latestDay.localeCompare(b.latestDay);
     });
+  const projects = [...comparableProjects, ...noBaselineLatestBySite.values()].sort((a, b) => {
+    if (a.increaseAmount === b.increaseAmount) {
+      return a.siteName.localeCompare(b.siteName);
+    }
+
+    return a.increaseAmount - b.increaseAmount;
+  });
+  const dailyProjects = [...comparableDailyProjects, ...noBaselineDailyProjects].sort((a, b) => {
+    if (a.latestDay === b.latestDay) {
+      if (a.increaseAmount === b.increaseAmount) {
+        return a.siteName.localeCompare(b.siteName);
+      }
+
+      return a.increaseAmount - b.increaseAmount;
+    }
+
+    return a.latestDay.localeCompare(b.latestDay);
+  });
 
   const dailyProjectsByDay = new Map<string, ProjectRow[]>();
-  for (const row of dailyProjects) {
+  for (const row of comparableDailyProjects) {
     const rows = dailyProjectsByDay.get(row.latestDay) ?? [];
     rows.push(row);
     dailyProjectsByDay.set(row.latestDay, rows);
@@ -753,7 +826,7 @@ export function buildAnalytics(records: PricingRecord[]): AnalyticsBundle {
     summaryByDay.set(day, summarizeProjects(rows));
   }
 
-  const summary = summarizeProjects(projects);
+  const summary = summarizeProjects(comparableProjects);
 
   return {
     metadata: {

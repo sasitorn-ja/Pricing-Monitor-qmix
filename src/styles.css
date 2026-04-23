@@ -32,6 +32,41 @@ select {
   padding: 32px;
 }
 
+.loadingScreen {
+  min-height: calc(100vh - 64px);
+  display: grid;
+  place-content: center;
+  gap: 8px;
+  text-align: center;
+  color: #bfd0ef;
+}
+
+.loadingScreen strong {
+  color: #eef4ff;
+  font-size: 1.1rem;
+}
+
+.slowDataNotice,
+.tableRefreshNotice {
+  border: 1px solid rgba(128, 221, 255, 0.24);
+  background: rgba(24, 64, 108, 0.34);
+  color: #dce8ff;
+  border-radius: 14px;
+  padding: 9px 12px;
+  font-weight: 700;
+}
+
+.slowDataNotice {
+  margin-bottom: 12px;
+}
+
+.tableRefreshNotice {
+  position: sticky;
+  top: 0;
+  z-index: 18;
+  margin-bottom: 8px;
+}
+
 .hero {
   display: grid;
   grid-template-columns: 1.35fr 0.9fr;
@@ -225,18 +260,46 @@ select {
 
 .chartStack {
   display: grid;
-  gap: 16px;
+  gap: 12px;
   margin-bottom: 12px;
 }
 
+.baselineModePanel {
+  display: flex;
+  justify-content: space-between;
+  gap: 14px;
+  align-items: center;
+  flex-wrap: wrap;
+  margin-bottom: 12px;
+  padding: 14px 16px;
+  border-radius: 22px;
+  border: 1px solid rgba(123, 157, 214, 0.16);
+  background: rgba(13, 25, 45, 0.62);
+}
+
+.baselineModePanel > div:first-child {
+  display: grid;
+  gap: 4px;
+}
+
+.baselineModePanel strong {
+  color: #eef4ff;
+}
+
+.discountTypeEmpty {
+  color: #9fb0d0;
+  font-size: 0.9rem;
+}
+
 .chartPanel {
-  padding: 22px;
+  padding: 16px;
 }
 
 .compactFilterDock {
   display: grid;
-  gap: 10px;
-  padding: 12px;
+  grid-template-columns: minmax(0, 1fr) minmax(360px, 0.72fr);
+  gap: 12px 18px;
+  padding: 12px 14px;
   margin-bottom: 10px;
   border-radius: 18px;
   border: 1px solid rgba(123, 157, 214, 0.16);
@@ -245,10 +308,29 @@ select {
 
 .compactFilterRow {
   display: grid;
-  gap: 8px;
+  grid-template-columns: 118px minmax(0, 1fr);
+  gap: 7px;
+  align-items: center;
+  min-width: 0;
+}
+
+.compactFilterDock .compactFilterRow:last-child {
+  grid-column: 1 / -1;
+  padding-top: 4px;
+  border-top: 1px solid rgba(123, 157, 214, 0.1);
+}
+
+.compactFilterDock .compactFilterRow:first-child {
+  grid-column: 1 / -1;
+}
+
+.compactFilterDock .compactFilterRow:nth-child(2),
+.compactFilterDock .compactFilterRow:nth-child(3) {
+  align-self: end;
 }
 
 .compactFilterLabel {
+  align-self: center;
   font-size: 0.76rem;
   font-weight: 700;
   letter-spacing: 0.08em;
@@ -257,8 +339,184 @@ select {
 
 .compactFilterChips {
   display: flex;
-  gap: 8px;
+  gap: 7px;
   flex-wrap: wrap;
+}
+
+.discountTypeCheckboxes {
+  display: flex;
+  gap: 7px;
+  flex-wrap: wrap;
+}
+
+.discountTypeOption {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  min-height: 32px;
+  border: 1px solid rgba(123, 157, 214, 0.22);
+  background: rgba(7, 17, 34, 0.92);
+  color: #dce8ff;
+  border-radius: 999px;
+  padding: 6px 10px;
+  cursor: pointer;
+  font-size: 0.86rem;
+  line-height: 1.1;
+  transition:
+    border-color 0.2s ease,
+    background 0.2s ease,
+    transform 0.2s ease;
+}
+
+.discountTypeOption:hover {
+  border-color: rgba(128, 221, 255, 0.55);
+  transform: translateY(-1px);
+}
+
+.discountTypeOption.selected {
+  background: rgba(53, 98, 168, 0.78);
+  border-color: rgba(128, 221, 255, 0.55);
+}
+
+.discountTypeOption input {
+  width: 14px;
+  height: 14px;
+  margin: 0;
+  accent-color: #60a5fa;
+}
+
+.divisionFcSplit {
+  display: grid;
+  gap: 8px;
+  min-width: 0;
+}
+
+.divisionFcTop,
+.divisionDropdownRow {
+  display: flex;
+  gap: 7px;
+  align-items: center;
+  flex-wrap: wrap;
+}
+
+.divisionFcTop {
+  margin-bottom: 2px;
+}
+
+.divisionMiniDropdown {
+  position: relative;
+  min-width: 0;
+}
+
+.divisionMiniDropdown > summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  list-style: none;
+  cursor: pointer;
+  border: 1px solid rgba(123, 157, 214, 0.22);
+  background: rgba(7, 17, 34, 0.92);
+  color: #dce8ff;
+  border-radius: 999px;
+  min-height: 32px;
+  padding: 6px 12px;
+  font-size: 0.86rem;
+  font-weight: 800;
+  white-space: nowrap;
+}
+
+.divisionMiniDropdown > summary::-webkit-details-marker {
+  display: none;
+}
+
+.divisionMiniDropdown > summary::after {
+  content: "⌄";
+  color: #8fb8ea;
+  font-size: 0.82rem;
+  transition: transform 0.2s ease;
+}
+
+.divisionMiniDropdown[open] > summary::after {
+  transform: rotate(180deg);
+}
+
+.divisionMiniDropdown.selected > summary {
+  background: rgba(53, 98, 168, 0.78);
+  border-color: rgba(128, 221, 255, 0.55);
+}
+
+.divisionMiniDropdown summary em {
+  border-radius: 999px;
+  background: rgba(8, 20, 38, 0.62);
+  color: #eef4ff;
+  padding: 1px 7px;
+  font-size: 0.74rem;
+  font-style: normal;
+  font-weight: 800;
+}
+
+.divisionMiniMenu {
+  position: absolute;
+  top: calc(100% + 8px);
+  left: 0;
+  z-index: 30;
+  display: grid;
+  gap: 9px;
+  width: min(260px, 78vw);
+  max-height: 320px;
+  overflow-y: auto;
+  padding: 10px;
+  border-radius: 16px;
+  border: 1px solid rgba(123, 157, 214, 0.2);
+  background: rgba(10, 22, 41, 0.98);
+  box-shadow: 0 20px 40px rgba(2, 8, 20, 0.35);
+}
+
+.divisionCheck,
+.fcCheck {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  min-width: 0;
+  color: #dce8ff;
+  cursor: pointer;
+}
+
+.divisionCheck {
+  font-weight: 800;
+}
+
+.divisionCheck span,
+.fcCheck span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.divisionCheck input,
+.fcCheck input {
+  flex: 0 0 auto;
+  width: 14px;
+  height: 14px;
+  margin: 0;
+  accent-color: #60a5fa;
+}
+
+.fcCheckboxGrid {
+  display: grid;
+  gap: 8px;
+  padding: 0 10px 10px 31px;
+}
+
+.fcCheck {
+  padding: 2px 0;
+  font-size: 0.84rem;
+}
+
+.fcCheck.selected {
+  border-color: rgba(128, 221, 255, 0.55);
+  background: rgba(53, 98, 168, 0.56);
 }
 
 .compactFilterChip {
@@ -266,7 +524,7 @@ select {
   background: rgba(7, 17, 34, 0.92);
   color: #dce8ff;
   border-radius: 999px;
-  padding: 7px 11px;
+  padding: 6px 10px;
   cursor: pointer;
   font-size: 0.86rem;
   line-height: 1.1;
@@ -366,6 +624,11 @@ select {
   cursor: pointer;
 }
 
+.clearFilterButton.mini {
+  padding: 6px 10px;
+  font-size: 0.82rem;
+}
+
 .globalChipGroup {
   display: flex;
   gap: 10px;
@@ -398,9 +661,9 @@ select {
 .panelHeader {
   display: flex;
   justify-content: space-between;
-  gap: 16px;
+  gap: 12px;
   align-items: flex-start;
-  margin-bottom: 16px;
+  margin-bottom: 10px;
 }
 
 .panelHeader > div:first-child {
@@ -436,7 +699,7 @@ select {
 
 .panelHeader p {
   color: #9fb0d0;
-  margin: 8px 0 0;
+  margin: 5px 0 0;
 }
 
 .panelHeader .chartNote {
@@ -462,7 +725,7 @@ select {
 }
 
 .proportionChart {
-  height: 500px;
+  height: 340px;
 }
 
 .lineInsightChart {
@@ -529,23 +792,27 @@ select {
 
 .filterShell {
   display: grid;
-  gap: 14px;
-  margin-bottom: 18px;
-  padding: 16px;
+  gap: 10px;
+  margin-bottom: 12px;
+  padding: 12px;
   border-radius: 22px;
   border: 1px solid rgba(123, 157, 214, 0.16);
   background: rgba(13, 25, 45, 0.62);
 }
 
 .projectFilterShell {
-  gap: 12px;
-  padding: 14px 16px;
-  border-radius: 22px;
+  grid-template-columns: 1fr;
+  gap: 10px;
+  padding: 12px;
+  border-radius: 20px;
 }
 
 .tableFilterTop {
   display: grid;
-  gap: 12px;
+  grid-template-columns: minmax(260px, 0.8fr) minmax(760px, 2.2fr);
+  gap: 10px;
+  align-items: stretch;
+  grid-column: 1 / -1;
 }
 
 .tableFilterPrimary {
@@ -558,24 +825,29 @@ select {
 .tableFilterInputs {
   display: grid;
   grid-template-columns:
-    minmax(210px, 1fr)
-    minmax(170px, 0.72fr)
-    minmax(170px, 0.72fr);
-  gap: 10px;
+    minmax(150px, 0.8fr)
+    minmax(170px, 1fr)
+    minmax(150px, 0.85fr);
+  gap: 8px;
   align-items: end;
 }
 
 .tableCompactRow {
   display: grid;
-  grid-template-columns: 92px minmax(0, 1fr);
-  gap: 10px;
-  align-items: start;
-  padding: 10px 0;
+  grid-template-columns: 150px minmax(0, 1fr);
+  gap: 12px;
+  align-items: center;
+  padding: 7px 2px;
   border-top: 1px solid rgba(123, 157, 214, 0.12);
+  border-radius: 0;
+  background: transparent;
+}
+
+.divisionFcTableRow {
+  grid-column: 1 / -1;
 }
 
 .tableCompactLabel {
-  padding-top: 10px;
   font-size: 0.76rem;
   font-weight: 700;
   letter-spacing: 0.08em;
@@ -583,12 +855,14 @@ select {
  }
 
 .tableFilterFooter {
+  grid-column: 1 / -1;
   display: flex;
   justify-content: space-between;
-  gap: 10px;
+  gap: 12px;
   align-items: center;
   flex-wrap: wrap;
-  padding-top: 2px;
+  min-height: 42px;
+  padding: 8px 2px 0;
 }
 
 .tableActiveFilters {
@@ -622,7 +896,7 @@ select {
 }
 
 .tableBucketRow {
-  gap: 8px;
+  gap: 7px;
 }
 
 .filterInlineRow {
@@ -678,6 +952,11 @@ select {
   width: 100%;
 }
 
+.tableFilterPrimary .searchField {
+  min-height: 38px;
+  height: 100%;
+}
+
 .singleSelectDropdown,
 .multiSelectDropdown {
   position: relative;
@@ -693,9 +972,9 @@ select {
   border: 1px solid rgba(123, 157, 214, 0.25);
   background: rgba(7, 17, 34, 0.92);
   color: #eef4ff;
-  border-radius: 14px;
-  padding: 8px 12px;
-  min-height: 42px;
+  border-radius: 13px;
+  padding: 7px 12px;
+  min-height: 38px;
 }
 
 .singleSelectDropdown summary::-webkit-details-marker,
@@ -801,8 +1080,8 @@ select {
   border: 1px solid rgba(123, 157, 214, 0.25);
   background: rgba(7, 17, 34, 0.92);
   color: #eef4ff;
-  border-radius: 14px;
-  padding: 11px 14px;
+  border-radius: 13px;
+  padding: 10px 14px;
 }
 
 select {
@@ -1100,6 +1379,18 @@ tbody tr:hover,
   .tableFilterPrimary,
   .tableFilterInputs {
     grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .compactFilterDock {
+    grid-template-columns: 1fr;
+  }
+
+  .compactFilterDock .compactFilterRow:last-child {
+    grid-column: auto;
+  }
+
+  .projectFilterShell {
+    grid-template-columns: 1fr;
   }
 }
 

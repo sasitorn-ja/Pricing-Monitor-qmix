@@ -2,31 +2,46 @@ import cors from "cors";
 import express from "express";
 import path from "path";
 import {
+  forceRefreshRemoteSnapshot,
   formatHandlerError,
+  getCacheStatus,
   getDashboard,
   getMeta,
   getProjectTrend,
   getProjects,
   getSummary,
   getTrend,
-  warmRemoteSnapshot
+  scheduleRemoteSnapshotRefresh
 } from "./api-handlers.js";
 
 const app = express();
 app.use(cors());
 
+function readCsvQuery(value: unknown) {
+  return String(value ?? "")
+    .split(",")
+    .map((item) => item.trim())
+    .filter(Boolean);
+}
+
 app.get("/api/dashboard", async (req, res) => {
   try {
-    const divisions = String(req.query.divisions ?? "")
-      .split(",")
-      .map((value) => value.trim())
-      .filter(Boolean);
-    const segments = String(req.query.segments ?? "")
-      .split(",")
-      .map((value) => value.trim())
-      .filter(Boolean);
+    const divisions = readCsvQuery(req.query.divisions);
+    const segments = readCsvQuery(req.query.segments);
+    const channels = readCsvQuery(req.query.channels);
+    const fcNames = readCsvQuery(req.query.fcNames);
+    const discountTypes = readCsvQuery(req.query.discountTypes);
 
-    res.json(await getDashboard({ divisions, segments, day: String(req.query.day ?? "") }));
+    res.json(
+      await getDashboard({
+        divisions,
+        segments,
+        channels,
+        fcNames,
+        discountTypes,
+        day: String(req.query.day ?? "")
+      })
+    );
   } catch (error) {
     res.status(502).json(formatHandlerError(error));
   }
@@ -42,16 +57,22 @@ app.get("/api/meta", async (_req, res) => {
 
 app.get("/api/summary", async (_req, res) => {
   try {
-    const divisions = String(_req.query.divisions ?? "")
-      .split(",")
-      .map((value) => value.trim())
-      .filter(Boolean);
-    const segments = String(_req.query.segments ?? "")
-      .split(",")
-      .map((value) => value.trim())
-      .filter(Boolean);
+    const divisions = readCsvQuery(_req.query.divisions);
+    const segments = readCsvQuery(_req.query.segments);
+    const channels = readCsvQuery(_req.query.channels);
+    const fcNames = readCsvQuery(_req.query.fcNames);
+    const discountTypes = readCsvQuery(_req.query.discountTypes);
 
-    res.json(await getSummary({ divisions, segments, day: String(_req.query.day ?? "") }));
+    res.json(
+      await getSummary({
+        divisions,
+        segments,
+        channels,
+        fcNames,
+        discountTypes,
+        day: String(_req.query.day ?? "")
+      })
+    );
   } catch (error) {
     res.status(502).json(formatHandlerError(error));
   }
@@ -59,16 +80,13 @@ app.get("/api/summary", async (_req, res) => {
 
 app.get("/api/trend", async (req, res) => {
   try {
-    const divisions = String(req.query.divisions ?? "")
-      .split(",")
-      .map((value) => value.trim())
-      .filter(Boolean);
-    const segments = String(req.query.segments ?? "")
-      .split(",")
-      .map((value) => value.trim())
-      .filter(Boolean);
+    const divisions = readCsvQuery(req.query.divisions);
+    const segments = readCsvQuery(req.query.segments);
+    const channels = readCsvQuery(req.query.channels);
+    const fcNames = readCsvQuery(req.query.fcNames);
+    const discountTypes = readCsvQuery(req.query.discountTypes);
 
-    res.json(await getTrend({ divisions, segments }));
+    res.json(await getTrend({ divisions, segments, channels, fcNames, discountTypes }));
   } catch (error) {
     res.status(502).json(formatHandlerError(error));
   }
@@ -87,10 +105,10 @@ app.get("/api/projects", async (req, res) => {
           .split(",")
           .map((value) => value.trim())
           .filter(Boolean),
-        segments: String(req.query.segments ?? "")
-          .split(",")
-          .map((value) => value.trim())
-          .filter(Boolean)
+        segments: readCsvQuery(req.query.segments),
+        channels: readCsvQuery(req.query.channels),
+        fcNames: readCsvQuery(req.query.fcNames),
+        discountTypes: readCsvQuery(req.query.discountTypes)
       })
     );
   } catch (error) {
@@ -106,12 +124,56 @@ app.get("/api/projects/:siteNo/trend", async (req, res) => {
           .split(",")
           .map((value) => value.trim())
           .filter(Boolean),
-        segments: String(req.query.segments ?? "")
-          .split(",")
-          .map((value) => value.trim())
-          .filter(Boolean)
+        segments: readCsvQuery(req.query.segments),
+        channels: readCsvQuery(req.query.channels),
+        fcNames: readCsvQuery(req.query.fcNames),
+        discountTypes: readCsvQuery(req.query.discountTypes)
       })
     );
+  } catch (error) {
+    res.status(502).json(formatHandlerError(error));
+  }
+});
+
+function canRefreshCache(req: express.Request) {
+  const token = process.env.CACHE_REFRESH_TOKEN ?? "";
+  if (!token) {
+    return true;
+  }
+
+  return (
+    req.headers.authorization === `Bearer ${token}` ||
+    String(req.query.token ?? "") === token
+  );
+}
+
+app.get("/api/cache/status", (_req, res) => {
+  res.json(getCacheStatus());
+});
+
+app.post("/api/cache/refresh", async (req, res) => {
+  if (!canRefreshCache(req)) {
+    res.status(401).json({ error: "Unauthorized cache refresh request." });
+    return;
+  }
+
+  try {
+    await forceRefreshRemoteSnapshot();
+    res.json(getCacheStatus());
+  } catch (error) {
+    res.status(502).json(formatHandlerError(error));
+  }
+});
+
+app.get("/api/cache/refresh", async (req, res) => {
+  if (!canRefreshCache(req)) {
+    res.status(401).json({ error: "Unauthorized cache refresh request." });
+    return;
+  }
+
+  try {
+    await forceRefreshRemoteSnapshot();
+    res.json(getCacheStatus());
   } catch (error) {
     res.status(502).json(formatHandlerError(error));
   }
@@ -127,5 +189,5 @@ app.get("/{*splat}", (req, res) => {
 
 app.listen(port, () => {
   console.log(`Pricing monitor API listening on http://localhost:${port}`);
-  warmRemoteSnapshot();
+  scheduleRemoteSnapshotRefresh();
 });

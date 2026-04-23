@@ -13,396 +13,47 @@ import {
   XAxis,
   YAxis
 } from "recharts";
-
-type MetaResponse = {
-  metadata: {
-    total_rows: number;
-    total_sites: number;
-    min_dp_date: string;
-    max_dp_date: string;
-  };
-  config: {
-    baselineStart: string;
-    baselineEnd: string;
-    campaignStart: string;
-    targetIncrease: number;
-  };
-  filters?: {
-    divisions: string[];
-    segments: string[];
-  };
-};
-
-type SummaryResponse = {
-  comparableSites: number;
-  ladder500: number;
-  ladder400: number;
-  ladder300: number;
-  ladder250: number;
-  ladder200: number;
-  ladder100: number;
-  ladder0: number;
-  belowTargetSites: number;
-  totalIncrease: number;
-  avgIncrease: number;
-  avgTargetPercent: number;
-  targetHitShare: number;
-  minIncrease: number;
-  maxIncrease: number;
-  latestDayMin?: string | null;
-  latestDayMax?: string | null;
-};
-
-type TrendPoint = {
-  day: string;
-  siteCount: number;
-  noBaseline: number;
-  ladder500: number;
-  ladder400: number;
-  ladder300: number;
-  ladder250: number;
-  ladder200: number;
-  ladder100: number;
-  ladder0: number;
-  volumeTotal: number;
-  volumeNoBaseline: number;
-  volumeLadder500: number;
-  volumeLadder400: number;
-  volumeLadder300: number;
-  volumeLadder250: number;
-  volumeLadder200: number;
-  volumeLadder100: number;
-  volumeLadder0: number;
-  disc0: number;
-  disc3: number;
-  disc6: number;
-  disc9: number;
-  disc12: number;
-  disc15: number;
-  avgIncrease: number;
-  avgTargetPercent: number;
-  moveInto500: number;
-  moveInto400: number;
-  moveInto300: number;
-  moveInto250: number;
-  moveInto200: number;
-  moveInto100: number;
-  moveInto0: number;
-};
-
-type ShareTrendPoint = TrendPoint & {
-  ladder300Plus: number;
-  ladder300PlusShare: number;
-  ladder500Share: number;
-  ladder400Share: number;
-  ladder300Share: number;
-  ladder250Share: number;
-  ladder200Share: number;
-  ladder100Share: number;
-  ladder0Share: number;
-  noBaselineShare: number;
-  volumeLadder500Share: number;
-  volumeLadder400Share: number;
-  volumeLadder300Share: number;
-  volumeLadder250Share: number;
-  volumeLadder200Share: number;
-  volumeLadder100Share: number;
-  volumeLadder0Share: number;
-  volumeNoBaselineShare: number;
-  disc0Share: number;
-  disc3Share: number;
-  disc6Share: number;
-  disc9Share: number;
-  disc12Share: number;
-  disc15Share: number;
-};
-
-type ProjectRow = {
-  siteNo: string;
-  siteName: string;
-  divisionName: string;
-  fcName: string;
-  sectName: string;
-  segment: string;
-  channel: string;
-  latestDay: string;
-  baselineNetPrice: number;
-  currentNetPrice: number;
-  baselineDisc: number;
-  currentDisc: number;
-  increaseAmount: number;
-  targetPercent: number;
-  ladder: string;
-  baselineVolume: number;
-  postVolume: number;
-};
-
-type ProjectTrendPoint = {
-  siteNo: string;
-  siteName: string;
-  day: string;
-  baselineNetPrice: number;
-  postNetPrice: number;
-  increaseAmount: number;
-  targetPercent: number;
-  ladder: string;
-};
-
-type ProjectTrendChartPoint = Omit<ProjectTrendPoint, "postNetPrice"> & {
-  postNetPrice: number;
-  hasRecord: boolean;
-  isBaselinePeriod: boolean;
-};
-
-type ProjectResponse = {
-  rows: ProjectRow[];
-  total: number;
-};
-
-type DashboardResponse = {
-  meta: MetaResponse;
-  summary: SummaryResponse;
-  trend: TrendPoint[];
-};
-
-type TrendRange = "all" | "post25" | "last14" | "last7";
-type PriceLadderMode = "summary" | "detail";
-type CalcHelpKey =
-  | "baselineDefinition"
-  | "totalIncrease"
-  | "averageToTarget"
-  | "proportionChart"
-  | "discountDropChart"
-  | "averageTrend"
-  | "projectTrend"
-  | "projectTable";
-
-const bucketLabels = [
-  { key: "500+", label: "500 บาทขึ้นไป", tone: "bg-green-600" },
-  { key: "400-499", label: "400-499 บาท", tone: "bg-green-500" },
-  { key: "300-399", label: "300-399 บาท", tone: "bg-emerald-400" },
-  { key: "250-299", label: "250-299 บาท", tone: "bg-cyan-400" },
-  { key: "200-249", label: "200-249 บาท", tone: "bg-sky-400" },
-  { key: "100-199", label: "100-199 บาท", tone: "bg-amber-400" },
-  { key: "0-99", label: "ต่ำกว่า 100 บาท", tone: "bg-rose-400" }
-] as const;
-
-const bucketColors = {
-  topMax: "#16a34a",
-  topHigh: "#22c55e",
-  top: "#34d399",
-  high: "#22d3ee",
-  bridge: "#38bdf8",
-  mid: "#fbbf24",
-  low: "#fb7185",
-  missing: "#94a3b8"
-} as const;
-
-const trendBucketSeries = [
-  { shareKey: "noBaselineShare", countKey: "noBaseline", name: "ไม่มี baseline", fill: bucketColors.missing },
-  { shareKey: "ladder0Share", countKey: "ladder0", name: "0-99", fill: bucketColors.low },
-  { shareKey: "ladder100Share", countKey: "ladder100", name: "100-199", fill: bucketColors.mid },
-  { shareKey: "ladder200Share", countKey: "ladder200", name: "200-249", fill: bucketColors.bridge },
-  { shareKey: "ladder250Share", countKey: "ladder250", name: "250-299", fill: bucketColors.high },
-  { shareKey: "ladder300PlusShare", countKey: "ladder300Plus", name: "300+", fill: bucketColors.topMax }
-] as const;
-
-const trendBucketDetailSeries = [
-  { shareKey: "noBaselineShare", countKey: "noBaseline", name: "ไม่มี baseline", fill: bucketColors.missing },
-  { shareKey: "ladder0Share", countKey: "ladder0", name: "0-99", fill: bucketColors.low },
-  { shareKey: "ladder100Share", countKey: "ladder100", name: "100-199", fill: bucketColors.mid },
-  { shareKey: "ladder200Share", countKey: "ladder200", name: "200-249", fill: bucketColors.bridge },
-  { shareKey: "ladder250Share", countKey: "ladder250", name: "250-299", fill: bucketColors.high },
-  { shareKey: "ladder300Share", countKey: "ladder300", name: "300-399", fill: bucketColors.top },
-  { shareKey: "ladder400Share", countKey: "ladder400", name: "400-499", fill: bucketColors.topHigh },
-  { shareKey: "ladder500Share", countKey: "ladder500", name: "500+", fill: bucketColors.topMax }
-] as const;
-
-const discountDropSeries = [
-  { shareKey: "noBaselineShare", countKey: "noBaseline", name: "ไม่มี baseline", fill: bucketColors.missing },
-  { shareKey: "disc0Share", countKey: "disc0", name: "0-2.9%", fill: bucketColors.low },
-  { shareKey: "disc3Share", countKey: "disc3", name: "3.0-5.9%", fill: bucketColors.mid },
-  { shareKey: "disc6Share", countKey: "disc6", name: "6.0-8.9%", fill: bucketColors.bridge },
-  { shareKey: "disc9Share", countKey: "disc9", name: "9.0-11.9%", fill: bucketColors.high },
-  { shareKey: "disc12Share", countKey: "disc12", name: "12.0-14.9%", fill: bucketColors.top },
-  { shareKey: "disc15Share", countKey: "disc15", name: "15%+", fill: bucketColors.topMax }
-] as const;
-
-const PAGE_SIZE = 20;
-const MULTI_LADDER_FETCH_SIZE = 100_000;
-const SEARCH_DEBOUNCE_MS = 250;
-const API_TIMEOUT_MS = 60_000;
-const tableColumnHelp = {
-  division: "พื้นที่ขายหรือหน่วยงานที่โครงการนี้อยู่ ใช้สำหรับกรองและดูภาพรวมแยกตามพื้นที่",
-  segment: "กลุ่มขนาดของโครงการ เช่น tiny, small, medium ใช้ตัวเดียวกับตัวกรอง Segment ด้านบน",
-  ladder: "ช่วงของราคาที่เพิ่มขึ้นเทียบกับ Baseline เช่น 0-99, 100-199, 200-249 หรือ 300 บาทขึ้นไป",
-  baseline: "ราคาอ้างอิงก่อนเริ่มติดตาม คำนวณจาก NP_AVG เฉลี่ยถ่วงปริมาณขายช่วง 1-24 มี.ค.",
-  current: "ราคา NP_AVG ของวันที่แสดงในแถวนี้ ถ้าไม่ได้เลือกวันจะใช้วันล่าสุดของโครงการนั้น",
-  increase: "ราคาที่เพิ่มขึ้น = Current - Baseline ถ้าราคาปัจจุบันต่ำกว่า Baseline จะนับเป็น 0",
-  baselineDisc: "Disc อ้างอิงก่อนเริ่มติดตาม คำนวณจาก DC_AVG เฉลี่ยถ่วงปริมาณขายช่วง 1-24 มี.ค.",
-  currentDisc: "Disc ของวันที่แสดงในแถวนี้ ถ้าไม่ได้เลือกวันจะใช้วันล่าสุดของโครงการนั้น",
-  latestDay: "วันที่ของข้อมูลราคาที่ใช้คำนวณแถวนี้"
-} as const;
-
-async function fetchJson<T>(url: string): Promise<T> {
-  let response: Response;
-
-  try {
-    response = await fetch(url, {
-      signal: AbortSignal.timeout(API_TIMEOUT_MS)
-    });
-  } catch (error) {
-    if (error instanceof Error && error.name === "TimeoutError") {
-      throw new Error(`Request timed out after ${API_TIMEOUT_MS / 1000} seconds`);
-    }
-
-    throw error;
-  }
-
-  if (!response.ok) {
-    let message = `Request failed: ${response.status}`;
-
-    try {
-      const errorBody = (await response.json()) as { error?: string };
-      message = errorBody.error || message;
-    } catch {
-      // Ignore JSON parse errors and keep the HTTP status message.
-    }
-
-    throw new Error(message);
-  }
-
-  return response.json() as Promise<T>;
-}
-
-function formatNumber(value: number) {
-  return new Intl.NumberFormat("th-TH", {
-    maximumFractionDigits: 2
-  }).format(value);
-}
-
-function formatPercent(value: number) {
-  if (!Number.isFinite(value)) {
-    return "0%";
-  }
-
-  return `${formatNumber(value)}%`;
-}
-
-function formatPercentTick(value: number) {
-  return `${Math.round(value)}%`;
-}
-
-function formatBaht(value: number) {
-  return `${formatNumber(value)} บาท`;
-}
-
-function formatShortDate(value: string) {
-  return new Date(value).toLocaleDateString("th-TH", {
-    month: "short",
-    day: "numeric"
-  });
-}
-
-function formatThaiDate(value: string) {
-  return new Date(value).toLocaleDateString("th-TH", {
-    year: "numeric",
-    month: "short",
-    day: "numeric"
-  });
-}
-
-function formatThaiDateShort(value: string) {
-  return new Date(value).toLocaleDateString("th-TH", {
-    month: "short",
-    day: "numeric"
-  });
-}
-
-function addDays(dateText: string, days: number) {
-  const date = new Date(`${dateText}T00:00:00Z`);
-  date.setUTCDate(date.getUTCDate() + days);
-  return date.toISOString().slice(0, 10);
-}
-
-function getDateRange(startDay: string, endDay: string) {
-  const days: string[] = [];
-
-  for (let day = startDay; day <= endDay; day = addDays(day, 1)) {
-    days.push(day);
-  }
-
-  return days;
-}
-
-function formatSummaryDateRange(summary: SummaryResponse, fallbackDay?: string) {
-  if ((!summary.latestDayMin || !summary.latestDayMax) && fallbackDay) {
-    return `ข้อมูลล่าสุดถึง ${formatThaiDateShort(fallbackDay)}`;
-  }
-
-  if (!summary.latestDayMin || !summary.latestDayMax) {
-    return "ไม่มีวันที่คำนวณ";
-  }
-
-  if (summary.latestDayMin === summary.latestDayMax) {
-    return `ณ วันที่ ${formatThaiDateShort(summary.latestDayMax)}`;
-  }
-
-  return `ช่วงวันที่ ${formatThaiDateShort(summary.latestDayMin)} ถึง ${formatThaiDateShort(summary.latestDayMax)}`;
-}
-
-function getPaginationItems(currentPage: number, totalPages: number) {
-  const items: Array<number | "ellipsis"> = [];
-  const addPage = (page: number) => {
-    if (page >= 1 && page <= totalPages && !items.includes(page)) {
-      items.push(page);
-    }
-  };
-
-  addPage(1);
-
-  if (currentPage > 4) {
-    items.push("ellipsis");
-  }
-
-  for (let page = currentPage - 1; page <= currentPage + 1; page += 1) {
-    addPage(page);
-  }
-
-  if (currentPage < totalPages - 3) {
-    items.push("ellipsis");
-  }
-
-  addPage(totalPages);
-
-  return items;
-}
-
-function renderPercentBarLabel(props: any) {
-  const x = Number(props.x ?? 0);
-  const y = Number(props.y ?? 0);
-  const width = Number(props.width ?? 0);
-  const height = Number(props.height ?? 0);
-  const value = Number(props.value ?? 0);
-
-  if (!value || value < 9 || height < 24 || width < 18) {
-    return null;
-  }
-
-  return (
-    <text
-      x={x + width / 2}
-      y={y + height / 2}
-      fill="#f8fbff"
-      fontSize={12}
-      fontWeight={700}
-      textAnchor="middle"
-      dominantBaseline="middle"
-    >
-      {formatPercentTick(value)}
-    </text>
-  );
-}
+import { renderPercentBarLabel } from "./components/chartLabels";
+import {
+  bucketColors,
+  bucketLabels,
+  discountDropSeries,
+  MULTI_LADDER_FETCH_SIZE,
+  PAGE_SIZE,
+  SEARCH_DEBOUNCE_MS,
+  tableColumnHelp,
+  trendBucketDetailSeries,
+  trendBucketSeries
+} from "./constants";
+import { useDelayedFlag } from "./hooks/useDelayedFlag";
+import { fetchJson } from "./lib/api";
+import {
+  formatBaht,
+  formatDiscountDropPercent,
+  formatNumber,
+  formatPercent,
+  formatPercentTick,
+  formatShortDate,
+  formatSummaryDateRange,
+  formatThaiDate,
+  formatThaiDateShort,
+  getDateRange,
+  getPaginationItems
+} from "./lib/format";
+import type {
+  CalcHelpKey,
+  DashboardResponse,
+  MetaResponse,
+  PriceLadderMode,
+  ProjectResponse,
+  ProjectRow,
+  ProjectTrendChartPoint,
+  ProjectTrendPoint,
+  ShareTrendPoint,
+  SummaryResponse,
+  TrendPoint,
+  TrendRange
+} from "./types";
 
 function HeaderWithHint({
   hintKey,
@@ -516,7 +167,7 @@ function SingleSelectDropdown({
             closeDropdown();
           }}
         >
-          ราคาล่าสุดทุกวัน
+          {fallbackLabel}
         </button>
         {options.map((option) => (
           <button
@@ -620,6 +271,168 @@ function MultiSelectDropdown({
   );
 }
 
+function DiscountTypeCheckboxGroup({
+  options,
+  selectedValues,
+  onToggle,
+  onClear
+}: {
+  options: string[];
+  selectedValues: string[];
+  onToggle: (value: string) => void;
+  onClear: () => void;
+}) {
+  if (options.length === 0) {
+    return null;
+  }
+
+  return (
+    <div className="discountTypeCheckboxes">
+      <label className={`discountTypeOption ${selectedValues.length === 0 ? "selected" : ""}`}>
+        <input
+          type="checkbox"
+          checked={selectedValues.length === 0}
+          onChange={onClear}
+        />
+        <span>ทั้งหมด</span>
+      </label>
+      {options.map((option) => (
+        <label
+          key={option}
+          className={`discountTypeOption ${selectedValues.includes(option) ? "selected" : ""}`}
+        >
+          <input
+            type="checkbox"
+            checked={selectedValues.includes(option)}
+            onChange={() => onToggle(option)}
+          />
+          <span>{option}</span>
+        </label>
+      ))}
+    </div>
+  );
+}
+
+function DivisionFcFilter({
+  divisions,
+  fcNamesByDivision,
+  selectedDivisions,
+  selectedFcNames,
+  onToggleDivision,
+  onClearDivisions,
+  onToggleFcName,
+  onClearFcNames
+}: {
+  divisions: string[];
+  fcNamesByDivision: Record<string, string[]>;
+  selectedDivisions: string[];
+  selectedFcNames: string[];
+  onToggleDivision: (value: string) => void;
+  onClearDivisions: () => void;
+  onToggleFcName: (value: string) => void;
+  onClearFcNames: () => void;
+}) {
+  const [openDivision, setOpenDivision] = useState<string | null>(null);
+  const dropdownRef = useRef<HTMLDivElement | null>(null);
+
+  useEffect(() => {
+    function handlePointerDown(event: MouseEvent) {
+      if (!dropdownRef.current || dropdownRef.current.contains(event.target as Node)) {
+        return;
+      }
+
+      setOpenDivision(null);
+    }
+
+    function handleEscape(event: KeyboardEvent) {
+      if (event.key === "Escape") {
+        setOpenDivision(null);
+      }
+    }
+
+    window.addEventListener("mousedown", handlePointerDown);
+    window.addEventListener("keydown", handleEscape);
+
+    return () => {
+      window.removeEventListener("mousedown", handlePointerDown);
+      window.removeEventListener("keydown", handleEscape);
+    };
+  }, []);
+
+  return (
+    <div ref={dropdownRef} className="divisionFcSplit">
+      <div className="divisionDropdownRow">
+        <button
+          type="button"
+          className={`compactFilterChip ${selectedDivisions.length === 0 && selectedFcNames.length === 0 ? "selected" : ""}`}
+          onClick={() => {
+            onClearDivisions();
+            onClearFcNames();
+          }}
+        >
+          ทั้งหมด
+        </button>
+        {selectedFcNames.length > 0 ? (
+          <button type="button" className="clearFilterButton mini" onClick={onClearFcNames}>
+            ล้าง FC
+          </button>
+        ) : null}
+        {divisions.map((division) => {
+          const fcNames = fcNamesByDivision[division] ?? [];
+          const isDivisionSelected = selectedDivisions.includes(division);
+          const selectedFcCount = fcNames.filter((fcName) =>
+            selectedFcNames.includes(fcName)
+          ).length;
+
+          return (
+            <details
+              key={division}
+              className={`divisionMiniDropdown ${
+                isDivisionSelected || selectedFcCount > 0 ? "selected" : ""
+              }`}
+              open={openDivision === division}
+              onToggle={(event) => {
+                const isOpen = event.currentTarget.open;
+                setOpenDivision(isOpen ? division : null);
+              }}
+            >
+              <summary>
+                <span>{division}</span>
+                {selectedFcCount > 0 ? <em>{selectedFcCount}</em> : null}
+              </summary>
+              <div className="divisionMiniMenu">
+                <label className={`divisionCheck ${isDivisionSelected ? "selected" : ""}`}>
+                  <input
+                    type="checkbox"
+                    checked={isDivisionSelected}
+                    onChange={() => onToggleDivision(division)}
+                  />
+                  <span>ทั้งหมดใน {division}</span>
+                </label>
+                <div className="fcCheckboxGrid">
+                  {fcNames.map((fcName) => (
+                    <label
+                      key={fcName}
+                      className={`fcCheck ${selectedFcNames.includes(fcName) ? "selected" : ""}`}
+                    >
+                      <input
+                        type="checkbox"
+                        checked={selectedFcNames.includes(fcName)}
+                        onChange={() => onToggleFcName(fcName)}
+                      />
+                      <span>{fcName}</span>
+                    </label>
+                  ))}
+                </div>
+              </div>
+            </details>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
 export function App() {
   const [meta, setMeta] = useState<MetaResponse | null>(null);
   const [summary, setSummary] = useState<SummaryResponse | null>(null);
@@ -631,6 +444,9 @@ export function App() {
   const [search, setSearch] = useState("");
   const [selectedDivisions, setSelectedDivisions] = useState<string[]>([]);
   const [selectedSegments, setSelectedSegments] = useState<string[]>([]);
+  const [selectedChannels, setSelectedChannels] = useState<string[]>([]);
+  const [selectedFcNames, setSelectedFcNames] = useState<string[]>([]);
+  const [selectedDiscountTypes, setSelectedDiscountTypes] = useState<string[]>([]);
   const [selectedSite, setSelectedSite] = useState<string>("");
   const [selectedTrend, setSelectedTrend] = useState<ProjectTrendPoint[]>([]);
   const [trendRange, setTrendRange] = useState<TrendRange>("all");
@@ -644,8 +460,12 @@ export function App() {
   );
   const [activeCalcHelp, setActiveCalcHelp] = useState<CalcHelpKey | null>(null);
   const [metaLoading, setMetaLoading] = useState(true);
+  const [dashboardLoading, setDashboardLoading] = useState(false);
+  const [projectLoading, setProjectLoading] = useState(false);
   const [error, setError] = useState("");
   const [projectError, setProjectError] = useState("");
+  const showDashboardSlowNotice = useDelayedFlag(metaLoading || dashboardLoading, 1400);
+  const showProjectSlowNotice = useDelayedFlag(projectLoading, 1400);
 
   const buildFilterQuery = () => {
     const params = new URLSearchParams();
@@ -658,6 +478,18 @@ export function App() {
       params.set("segments", selectedSegments.join(","));
     }
 
+    if (selectedChannels.length > 0) {
+      params.set("channels", selectedChannels.join(","));
+    }
+
+    if (selectedFcNames.length > 0) {
+      params.set("fcNames", selectedFcNames.join(","));
+    }
+
+    if (selectedDiscountTypes.length > 0) {
+      params.set("discountTypes", selectedDiscountTypes.join(","));
+    }
+
     return params;
   };
 
@@ -668,6 +500,16 @@ export function App() {
     setter((items) =>
       items.includes(value) ? items.filter((item) => item !== value) : [...items, value]
     );
+  };
+
+  const clearDivisions = () => {
+    setSelectedDivisions([]);
+    setSelectedFcNames([]);
+  };
+
+  const toggleDivision = (value: string) => {
+    toggleValue(value, setSelectedDivisions);
+    setSelectedFcNames([]);
   };
 
   useEffect(() => {
@@ -710,12 +552,16 @@ export function App() {
         hasLoadedSummary &&
         !selectedDay &&
         selectedDivisions.length === 0 &&
-        selectedSegments.length === 0
+        selectedSegments.length === 0 &&
+        selectedChannels.length === 0 &&
+        selectedFcNames.length === 0 &&
+        selectedDiscountTypes.length === 0
       ) {
         return;
       }
 
       try {
+        setDashboardLoading(true);
         setError("");
         const params = buildFilterQuery();
         if (selectedDay) {
@@ -736,11 +582,22 @@ export function App() {
         setError(
           requestError instanceof Error ? requestError.message : "Unknown error"
         );
+      } finally {
+        setDashboardLoading(false);
       }
     }
 
     void loadFilteredDashboard();
-  }, [hasLoadedSummary, meta, selectedDay, selectedDivisions, selectedSegments]);
+  }, [
+    hasLoadedSummary,
+    meta,
+    selectedDay,
+    selectedDivisions,
+    selectedSegments,
+    selectedChannels,
+    selectedFcNames,
+    selectedDiscountTypes
+  ]);
 
   useEffect(() => {
     async function loadProjects() {
@@ -749,6 +606,7 @@ export function App() {
       }
 
       try {
+        setProjectLoading(true);
         setProjectError("");
         const baseParams = buildFilterQuery();
 
@@ -824,6 +682,8 @@ export function App() {
         setProjectError(
           requestError instanceof Error ? requestError.message : "Unknown error"
         );
+      } finally {
+        setProjectLoading(false);
       }
     }
 
@@ -836,12 +696,24 @@ export function App() {
     selectedBuckets,
     selectedDay,
     selectedDivisions,
+    selectedChannels,
+    selectedFcNames,
+    selectedDiscountTypes,
     selectedSegments
   ]);
 
   useEffect(() => {
     setCurrentPage(1);
-  }, [search, selectedBuckets, selectedDay, selectedDivisions, selectedSegments]);
+  }, [
+    search,
+    selectedBuckets,
+    selectedDay,
+    selectedDivisions,
+    selectedSegments,
+    selectedChannels,
+    selectedFcNames,
+    selectedDiscountTypes
+  ]);
 
   useEffect(() => {
     async function loadSelectedTrend() {
@@ -866,7 +738,14 @@ export function App() {
     }
 
     void loadSelectedTrend();
-  }, [selectedSite, selectedDivisions, selectedSegments]);
+  }, [
+    selectedSite,
+    selectedDivisions,
+    selectedSegments,
+    selectedChannels,
+    selectedFcNames,
+    selectedDiscountTypes
+  ]);
 
   const selectedTrendChartData = useMemo<ProjectTrendChartPoint[]>(() => {
     if (!meta || !selectedSite || selectedTrend.length === 0) {
@@ -985,6 +864,9 @@ export function App() {
 
   const availableDivisions = meta?.filters?.divisions ?? [];
   const availableSegments = meta?.filters?.segments ?? [];
+  const availableChannels = meta?.filters?.channels ?? [];
+  const fcNamesByDivision = meta?.filters?.fcNamesByDivision ?? {};
+  const availableDiscountTypes = meta?.filters?.discountTypes ?? [];
 
   const totalPages = Math.max(1, Math.ceil(projectTotal / PAGE_SIZE));
   const firstProjectIndex = projectTotal === 0 ? 0 : (currentPage - 1) * PAGE_SIZE + 1;
@@ -1017,6 +899,27 @@ export function App() {
     });
   }
 
+  if (selectedChannels.length > 0) {
+    activeTableFilters.push({
+      label: "Channel",
+      value: selectedChannels.join(", ")
+    });
+  }
+
+  if (selectedFcNames.length > 0) {
+    activeTableFilters.push({
+      label: "FC",
+      value: selectedFcNames.join(", ")
+    });
+  }
+
+  if (selectedDiscountTypes.length > 0) {
+    activeTableFilters.push({
+      label: "Discount type",
+      value: selectedDiscountTypes.join(", ")
+    });
+  }
+
   if (search.trim()) {
     activeTableFilters.push({
       label: "Search",
@@ -1025,7 +928,18 @@ export function App() {
   }
 
   if (!error && (metaLoading || !hasLoadedSummary)) {
-    return <div className="shell">Loading dashboard...</div>;
+    return (
+      <div className="shell">
+        <div className="loadingScreen">
+          <strong>กำลังโหลด dashboard...</strong>
+          <span>
+            {showDashboardSlowNotice
+              ? "ข้อมูลชุดนี้ใช้เวลานานกว่าปกติ ระบบยังโหลดต่ออยู่"
+              : "กำลังเตรียมข้อมูลล่าสุด"}
+          </span>
+        </div>
+      </div>
+    );
   }
 
   if (error || !meta || !summary) {
@@ -1098,7 +1012,7 @@ export function App() {
         "แต่ละจุดใช้สูตรเดียวกับ Total increase: SUM(ราคาเพิ่มขึ้น x SUMQ) / SUM(SUMQ)",
         "ราคาเพิ่มขึ้นของแต่ละโครงการ = ราคา NP_AVG ของวันนั้น - ราคา Baseline",
         "ถ้าราคาวันนั้นต่ำกว่า Baseline จะนับเป็น 0",
-        "เมื่อเลือก Division หรือ Segment กราฟนี้จะคำนวณใหม่เฉพาะกลุ่มที่เลือก"
+        "เมื่อเลือก Division, Segment หรือ DISCOUNT_TYPE กราฟนี้จะคำนวณใหม่เฉพาะกลุ่มที่เลือก"
       ]
     },
     projectTrend: {
@@ -1116,12 +1030,12 @@ export function App() {
     projectTable: {
       title: "Project table อ่านยังไง",
       lines: [
-        "ตารางนี้แสดงรายละเอียดรายโครงการหลังใช้ตัวกรอง เช่น วันที่, Division, Segment และ Ladder",
+        "ตารางนี้แสดงรายละเอียดรายโครงการหลังใช้ตัวกรอง เช่น วันที่, Division, Segment, DISCOUNT_TYPE และ Ladder",
         "Baseline คือราคาอ้างอิงของโครงการ คำนวณจาก NP_AVG เฉลี่ยถ่วง SUMQ ช่วง 1-24 มี.ค.",
-        "Current คือราคา NP_AVG ของวันที่เลือก ถ้าไม่ได้เลือกวันจะใช้ราคาล่าสุดของแต่ละโครงการ",
+        "Current คือราคา NP_AVG ของวันที่แสดงในแต่ละแถว ถ้าไม่ได้เลือกวัน ตารางจะแสดงข้อมูลรายวันทั้งหมด",
         "Increase vs Baseline = Current - Baseline และถ้าติดลบจะนับเป็น 0",
         "Disc Baseline และ Disc Current คือ DC_AVG เฉลี่ยถ่วง SUMQ ของช่วง baseline และวันที่แสดงในแถว",
-        `ตารางแสดงทีละ ${formatNumber(PAGE_SIZE)} รายการต่อหน้า จากจำนวนโครงการที่ผ่านตัวกรองทั้งหมด`
+        `ตารางแสดงทีละ ${formatNumber(PAGE_SIZE)} รายการต่อหน้า จากจำนวนแถวรายวันที่ผ่านตัวกรองทั้งหมด`
       ]
     }
   };
@@ -1148,6 +1062,23 @@ export function App() {
         </div>
       </header>
 
+      <section className="baselineModePanel">
+        <div>
+          <span className="compactFilterLabel">DISCOUNT_TYPE</span>
+          <strong>โหมดคำนวณ Baseline</strong>
+        </div>
+        {availableDiscountTypes.length > 0 ? (
+          <DiscountTypeCheckboxGroup
+            options={availableDiscountTypes}
+            selectedValues={selectedDiscountTypes}
+            onToggle={(value) => toggleValue(value, setSelectedDiscountTypes)}
+            onClear={() => setSelectedDiscountTypes([])}
+          />
+        ) : (
+          <span className="discountTypeEmpty">ไม่พบค่า DISCOUNT_TYPE ในข้อมูล</span>
+        )}
+      </section>
+
       <section className="gridStats">
         <article className="statCard">
           <button type="button" className="calcHelpButton" onClick={() => setActiveCalcHelp("totalIncrease")}>
@@ -1166,6 +1097,14 @@ export function App() {
           <p>สัดส่วนโครงการที่ขึ้นถึง 300 บาท B/C ขึ้นไป {summaryDateRange}</p>
         </article>
       </section>
+
+      {dashboardLoading ? (
+        <div className="slowDataNotice">
+          {showDashboardSlowNotice
+            ? "ข้อมูลกำลังคำนวณนานกว่าปกติ แสดงข้อมูลเดิมไว้ก่อนจนกว่าจะโหลดเสร็จ"
+            : "กำลังอัปเดตข้อมูลตาม filter..."}
+        </div>
+      ) : null}
 
       <section className="chartStack sectionPanel">
         <article className="panel chartPanel">
@@ -1201,8 +1140,11 @@ export function App() {
                 type="button"
                 className="clearFilterButton"
                 onClick={() => {
-                  setSelectedDivisions([]);
+                  clearDivisions();
                   setSelectedSegments([]);
+                  setSelectedChannels([]);
+                  setSelectedFcNames([]);
+                  setSelectedDiscountTypes([]);
                 }}
               >
                 ล้างตัวกรอง
@@ -1213,25 +1155,16 @@ export function App() {
           <div className="compactFilterDock">
             <div className="compactFilterRow">
               <span className="compactFilterLabel">DIVISION</span>
-              <div className="compactFilterChips">
-                <button
-                  type="button"
-                  className={`compactFilterChip ${selectedDivisions.length === 0 ? "selected" : ""}`}
-                  onClick={() => setSelectedDivisions([])}
-                >
-                  ทั้งหมด
-                </button>
-                {availableDivisions.map((division) => (
-                  <button
-                    key={division}
-                    type="button"
-                    className={`compactFilterChip ${selectedDivisions.includes(division) ? "selected" : ""}`}
-                    onClick={() => toggleValue(division, setSelectedDivisions)}
-                  >
-                    {division}
-                  </button>
-                ))}
-              </div>
+              <DivisionFcFilter
+                divisions={availableDivisions}
+                fcNamesByDivision={fcNamesByDivision}
+                selectedDivisions={selectedDivisions}
+                selectedFcNames={selectedFcNames}
+                onToggleDivision={toggleDivision}
+                onClearDivisions={clearDivisions}
+                onToggleFcName={(value) => toggleValue(value, setSelectedFcNames)}
+                onClearFcNames={() => setSelectedFcNames([])}
+              />
             </div>
 
             <div className="compactFilterRow">
@@ -1255,6 +1188,39 @@ export function App() {
                   </button>
                 ))}
               </div>
+            </div>
+
+            <div className="compactFilterRow">
+              <span className="compactFilterLabel">CHANNEL</span>
+              <div className="compactFilterChips">
+                <button
+                  type="button"
+                  className={`compactFilterChip ${selectedChannels.length === 0 ? "selected" : ""}`}
+                  onClick={() => setSelectedChannels([])}
+                >
+                  ทั้งหมด
+                </button>
+                {availableChannels.map((channel) => (
+                  <button
+                    key={channel}
+                    type="button"
+                    className={`compactFilterChip ${selectedChannels.includes(channel) ? "selected" : ""}`}
+                    onClick={() => toggleValue(channel, setSelectedChannels)}
+                  >
+                    {channel}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            <div className="compactFilterRow">
+              <span className="compactFilterLabel">DISCOUNT_TYPE</span>
+              <DiscountTypeCheckboxGroup
+                options={availableDiscountTypes}
+                selectedValues={selectedDiscountTypes}
+                onToggle={(value) => toggleValue(value, setSelectedDiscountTypes)}
+                onClear={() => setSelectedDiscountTypes([])}
+              />
             </div>
           </div>
 
@@ -1329,8 +1295,11 @@ export function App() {
                 type="button"
                 className="clearFilterButton"
                 onClick={() => {
-                  setSelectedDivisions([]);
+                  clearDivisions();
                   setSelectedSegments([]);
+                  setSelectedChannels([]);
+                  setSelectedFcNames([]);
+                  setSelectedDiscountTypes([]);
                 }}
               >
                 ล้างตัวกรอง
@@ -1341,25 +1310,16 @@ export function App() {
           <div className="compactFilterDock">
             <div className="compactFilterRow">
               <span className="compactFilterLabel">DIVISION</span>
-              <div className="compactFilterChips">
-                <button
-                  type="button"
-                  className={`compactFilterChip ${selectedDivisions.length === 0 ? "selected" : ""}`}
-                  onClick={() => setSelectedDivisions([])}
-                >
-                  ทั้งหมด
-                </button>
-                {availableDivisions.map((division) => (
-                  <button
-                    key={division}
-                    type="button"
-                    className={`compactFilterChip ${selectedDivisions.includes(division) ? "selected" : ""}`}
-                    onClick={() => toggleValue(division, setSelectedDivisions)}
-                  >
-                    {division}
-                  </button>
-                ))}
-              </div>
+              <DivisionFcFilter
+                divisions={availableDivisions}
+                fcNamesByDivision={fcNamesByDivision}
+                selectedDivisions={selectedDivisions}
+                selectedFcNames={selectedFcNames}
+                onToggleDivision={toggleDivision}
+                onClearDivisions={clearDivisions}
+                onToggleFcName={(value) => toggleValue(value, setSelectedFcNames)}
+                onClearFcNames={() => setSelectedFcNames([])}
+              />
             </div>
 
             <div className="compactFilterRow">
@@ -1383,6 +1343,39 @@ export function App() {
                   </button>
                 ))}
               </div>
+            </div>
+
+            <div className="compactFilterRow">
+              <span className="compactFilterLabel">CHANNEL</span>
+              <div className="compactFilterChips">
+                <button
+                  type="button"
+                  className={`compactFilterChip ${selectedChannels.length === 0 ? "selected" : ""}`}
+                  onClick={() => setSelectedChannels([])}
+                >
+                  ทั้งหมด
+                </button>
+                {availableChannels.map((channel) => (
+                  <button
+                    key={channel}
+                    type="button"
+                    className={`compactFilterChip ${selectedChannels.includes(channel) ? "selected" : ""}`}
+                    onClick={() => toggleValue(channel, setSelectedChannels)}
+                  >
+                    {channel}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            <div className="compactFilterRow">
+              <span className="compactFilterLabel">DISCOUNT_TYPE</span>
+              <DiscountTypeCheckboxGroup
+                options={availableDiscountTypes}
+                selectedValues={selectedDiscountTypes}
+                onToggle={(value) => toggleValue(value, setSelectedDiscountTypes)}
+                onClear={() => setSelectedDiscountTypes([])}
+              />
             </div>
           </div>
 
@@ -1661,16 +1654,8 @@ export function App() {
                   label: formatThaiDate(day)
                 }))}
                 selectedValue={selectedDay}
-                fallbackLabel="ราคาล่าสุดทุกวัน"
+                fallbackLabel="ทุกวัน"
                 onSelect={setSelectedDay}
-              />
-              <MultiSelectDropdown
-                label="Division"
-                options={availableDivisions}
-                selectedValues={selectedDivisions}
-                fallbackLabel="ทุก division"
-                onToggle={(value) => toggleValue(value, setSelectedDivisions)}
-                onClear={() => setSelectedDivisions([])}
               />
               <MultiSelectDropdown
                 label="Segment"
@@ -1680,7 +1665,39 @@ export function App() {
                 onToggle={(value) => toggleValue(value, setSelectedSegments)}
                 onClear={() => setSelectedSegments([])}
               />
+              <MultiSelectDropdown
+                label="Channel"
+                options={availableChannels}
+                selectedValues={selectedChannels}
+                fallbackLabel="ทุก channel"
+                onToggle={(value) => toggleValue(value, setSelectedChannels)}
+                onClear={() => setSelectedChannels([])}
+              />
             </div>
+          </div>
+
+          <div className="tableCompactRow divisionFcTableRow">
+            <span className="tableCompactLabel">DIVISION / FC</span>
+            <DivisionFcFilter
+              divisions={availableDivisions}
+              fcNamesByDivision={fcNamesByDivision}
+              selectedDivisions={selectedDivisions}
+              selectedFcNames={selectedFcNames}
+              onToggleDivision={toggleDivision}
+              onClearDivisions={clearDivisions}
+              onToggleFcName={(value) => toggleValue(value, setSelectedFcNames)}
+              onClearFcNames={() => setSelectedFcNames([])}
+            />
+          </div>
+
+          <div className="tableCompactRow">
+            <span className="tableCompactLabel">DISCOUNT_TYPE</span>
+            <DiscountTypeCheckboxGroup
+              options={availableDiscountTypes}
+              selectedValues={selectedDiscountTypes}
+              onToggle={(value) => toggleValue(value, setSelectedDiscountTypes)}
+              onClear={() => setSelectedDiscountTypes([])}
+            />
           </div>
 
           <div className="tableCompactRow">
@@ -1732,8 +1749,11 @@ export function App() {
                 setSearch("");
                 setSelectedDay("");
                 setSelectedBuckets([]);
-                setSelectedDivisions([]);
+                clearDivisions();
                 setSelectedSegments([]);
+                setSelectedChannels([]);
+                setSelectedFcNames([]);
+                setSelectedDiscountTypes([]);
                 setCurrentPage(1);
               }}
             >
@@ -1748,6 +1768,14 @@ export function App() {
               โหลดรายการโครงการไม่สำเร็จ: {projectError}
             </div>
           ) : hasLoadedProjects ? (
+            <>
+              {projectLoading ? (
+                <div className="tableRefreshNotice">
+                  {showProjectSlowNotice
+                    ? "รายการโครงการใช้เวลานานกว่าปกติ กำลังโหลดต่อ..."
+                    : "กำลังอัปเดตรายการโครงการ..."}
+                </div>
+              ) : null}
             <table>
               <thead>
                 <tr>
@@ -1847,8 +1875,19 @@ export function App() {
                   </th>
                   <th>
                     <HeaderWithHint
+                      hintKey="discount"
+                      label="Discount"
+                      hint={tableColumnHelp.discount}
+                      activeHint={activeHint}
+                      onToggle={(key) =>
+                        setActiveHint((current) => (current === key ? null : key))
+                      }
+                    />
+                  </th>
+                  <th>
+                    <HeaderWithHint
                       hintKey="latestDay"
-                      label={selectedDay ? "Selected day" : "Latest day"}
+                      label={selectedDay ? "Selected day" : "Day"}
                       hint={
                         selectedDay
                           ? "วันที่ที่ใช้กรองในตารางนี้"
@@ -1886,13 +1925,19 @@ export function App() {
                     <td>{formatNumber(row.increaseAmount)}</td>
                     <td>{formatNumber(row.baselineDisc)}</td>
                     <td>{formatNumber(row.currentDisc)}</td>
+                    <td>{formatDiscountDropPercent(row.baselineDisc, row.currentDisc)}</td>
                     <td>{row.latestDay}</td>
                   </tr>
                 ))}
               </tbody>
             </table>
+            </>
           ) : (
-            <div className="tableLoadingState">กำลังโหลดรายการโครงการ...</div>
+            <div className="tableLoadingState">
+              {showProjectSlowNotice
+                ? "กำลังโหลดรายการโครงการ ข้อมูลชุดนี้อาจใช้เวลานาน"
+                : "กำลังโหลดรายการโครงการ..."}
+            </div>
           )}
         </div>
 

@@ -15,6 +15,18 @@ export default async function handler(req: ApiRequest, res: ApiResponse) {
           .split(",")
           .map((value) => value.trim())
           .filter(Boolean),
+        channels: readQueryValue(req.query, "channels")
+          .split(",")
+          .map((value) => value.trim())
+          .filter(Boolean),
+        fcNames: readQueryValue(req.query, "fcNames")
+          .split(",")
+          .map((value) => value.trim())
+          .filter(Boolean),
+        discountTypes: readQueryValue(req.query, "discountTypes")
+          .split(",")
+          .map((value) => value.trim())
+          .filter(Boolean),
         day: readQueryValue(req.query, "day")
       })
     );

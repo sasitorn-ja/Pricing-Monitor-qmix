@@ -13,6 +13,9 @@ type AnalyticsSnapshot = ReturnType<typeof buildAnalytics>;
 type FilterParams = {
   divisions?: string[];
   segments?: string[];
+  channels?: string[];
+  fcNames?: string[];
+  discountTypes?: string[];
   day?: string;
 };
 
@@ -27,12 +30,25 @@ const REMOTE_FETCH_TIMEOUT_MS =
   Number.isFinite(parsedRemoteFetchTimeoutMs) && parsedRemoteFetchTimeoutMs > 0
     ? parsedRemoteFetchTimeoutMs
     : DEFAULT_REMOTE_FETCH_TIMEOUT_MS;
-const MEMORY_CACHE_TTL_MS = 5 * 60 * 1000;
+const DEFAULT_MEMORY_CACHE_TTL_MS = 24 * 60 * 60 * 1000;
+const parsedMemoryCacheTtlMs = Number(process.env.DATA_CACHE_TTL_MS ?? "");
+const MEMORY_CACHE_TTL_MS =
+  Number.isFinite(parsedMemoryCacheTtlMs) && parsedMemoryCacheTtlMs > 0
+    ? parsedMemoryCacheTtlMs
+    : DEFAULT_MEMORY_CACHE_TTL_MS;
+const DEFAULT_CACHE_PRELOAD_INTERVAL_MS = 24 * 60 * 60 * 1000;
+const parsedCachePreloadIntervalMs = Number(process.env.DATA_CACHE_PRELOAD_INTERVAL_MS ?? "");
+const CACHE_PRELOAD_INTERVAL_MS =
+  Number.isFinite(parsedCachePreloadIntervalMs) && parsedCachePreloadIntervalMs > 0
+    ? parsedCachePreloadIntervalMs
+    : DEFAULT_CACHE_PRELOAD_INTERVAL_MS;
 const REMOTE_FETCH_MAX_RETRIES = 2;
 const RETRY_BACKOFF_MS = 1_000;
+const PERSISTED_CACHE_DIR = process.env.VERCEL
+  ? "/tmp"
+  : path.join(process.cwd(), ".cache");
 const PERSISTED_CACHE_PATH = path.join(
-  process.cwd(),
-  ".cache",
+  PERSISTED_CACHE_DIR,
   "pricing-monitor-records.json"
 );
 
@@ -51,6 +67,7 @@ let pendingRemoteSnapshot:
   | null = null;
 let pendingCacheHydration: Promise<void> | null = null;
 let hasHydratedPersistedCache = false;
+let cachePreloadTimer: ReturnType<typeof setInterval> | null = null;
 
 function wait(ms: number) {
   return new Promise((resolve) => setTimeout(resolve, ms));
@@ -171,6 +188,23 @@ async function refreshRemoteSnapshot() {
   return result;
 }
 
+export async function forceRefreshRemoteSnapshot() {
+  if (!pendingRemoteSnapshot) {
+    pendingRemoteSnapshot = refreshRemoteSnapshot();
+
+    void pendingRemoteSnapshot.then(
+      () => {
+        pendingRemoteSnapshot = null;
+      },
+      () => {
+        pendingRemoteSnapshot = null;
+      }
+    );
+  }
+
+  return pendingRemoteSnapshot;
+}
+
 function toReadableError(error: unknown) {
   if (error instanceof Error) {
     const message = error.message;
@@ -215,18 +249,7 @@ async function getRemoteSnapshot() {
     };
   }
 
-  if (!pendingRemoteSnapshot) {
-    pendingRemoteSnapshot = refreshRemoteSnapshot();
-
-    void pendingRemoteSnapshot.then(
-      () => {
-        pendingRemoteSnapshot = null;
-      },
-      () => {
-        pendingRemoteSnapshot = null;
-      }
-    );
-  }
+  const refreshPromise = forceRefreshRemoteSnapshot();
 
   if (remoteCache.snapshot && remoteCache.records) {
     return {
@@ -236,7 +259,7 @@ async function getRemoteSnapshot() {
   }
 
   try {
-    return await pendingRemoteSnapshot;
+    return await refreshPromise;
   } catch (error) {
     if (remoteCache.snapshot && remoteCache.records) {
       return {
@@ -258,8 +281,17 @@ function normalizeFilterValues(values: string[] = []) {
 function filterRecords(records: PricingRecord[], filters: FilterParams) {
   const divisions = new Set(normalizeFilterValues(filters.divisions));
   const segments = new Set(normalizeFilterValues(filters.segments));
+  const channels = new Set(normalizeFilterValues(filters.channels));
+  const fcNames = new Set(normalizeFilterValues(filters.fcNames));
+  const discountTypes = new Set(normalizeFilterValues(filters.discountTypes));
 
-  if (divisions.size === 0 && segments.size === 0) {
+  if (
+    divisions.size === 0 &&
+    segments.size === 0 &&
+    channels.size === 0 &&
+    fcNames.size === 0 &&
+    discountTypes.size === 0
+  ) {
     return records;
   }
 
@@ -268,16 +300,71 @@ function filterRecords(records: PricingRecord[], filters: FilterParams) {
       divisions.size === 0 || divisions.has(String(record.DIVISION_NAME ?? ""));
     const matchesSegment =
       segments.size === 0 || segments.has(String(record.SEGMENT ?? ""));
+    const matchesChannel =
+      channels.size === 0 || channels.has(String(record.CHANNEL ?? ""));
+    const matchesFcName =
+      fcNames.size === 0 || fcNames.has(String(record.FC_NAME ?? ""));
+    const matchesDiscountType =
+      discountTypes.size === 0 || discountTypes.has(String(record.DISCOUNT_TYPE ?? ""));
 
-    return matchesDivision && matchesSegment;
+    return (
+      matchesDivision &&
+      matchesSegment &&
+      matchesChannel &&
+      matchesFcName &&
+      matchesDiscountType
+    );
   });
 }
 
 function buildFilterCacheKey(filters: FilterParams) {
   const divisions = normalizeFilterValues(filters.divisions).sort();
   const segments = normalizeFilterValues(filters.segments).sort();
+  const channels = normalizeFilterValues(filters.channels).sort();
+  const fcNames = normalizeFilterValues(filters.fcNames).sort();
+  const discountTypes = normalizeFilterValues(filters.discountTypes).sort();
 
-  return JSON.stringify({ divisions, segments });
+  return JSON.stringify({ divisions, segments, channels, fcNames, discountTypes });
+}
+
+function getAvailableFilters(records: PricingRecord[]) {
+  const divisions = new Set<string>();
+  const segments = new Set<string>();
+  const channels = new Set<string>();
+  const discountTypes = new Set<string>();
+  const fcNamesByDivision: Record<string, string[]> = {};
+
+  for (const record of records) {
+    const division = String(record.DIVISION_NAME ?? "").trim();
+    const segment = String(record.SEGMENT ?? "").trim();
+    const channel = String(record.CHANNEL ?? "").trim();
+    const discountType = String(record.DISCOUNT_TYPE ?? "").trim();
+    const fcName = String(record.FC_NAME ?? "").trim();
+
+    if (division) divisions.add(division);
+    if (segment) segments.add(segment);
+    if (channel) channels.add(channel);
+    if (discountType) discountTypes.add(discountType);
+
+    if (division && fcName) {
+      fcNamesByDivision[division] = fcNamesByDivision[division] ?? [];
+      if (!fcNamesByDivision[division].includes(fcName)) {
+        fcNamesByDivision[division].push(fcName);
+      }
+    }
+  }
+
+  for (const names of Object.values(fcNamesByDivision)) {
+    names.sort();
+  }
+
+  return {
+    divisions: [...divisions].sort(),
+    segments: [...segments].sort(),
+    channels: [...channels].sort(),
+    discountTypes: [...discountTypes].sort(),
+    fcNamesByDivision
+  };
 }
 
 async function getFilteredSnapshot(filters: FilterParams = {}) {
@@ -306,18 +393,7 @@ async function getFilteredSnapshot(filters: FilterParams = {}) {
 
 export async function getMeta() {
   const { snapshot, records } = await getRemoteSnapshot();
-  const divisions = [
-    ...new Set(
-      records
-        .map((record) => String(record.DIVISION_NAME ?? "").trim())
-        .filter(Boolean)
-    )
-  ].sort();
-  const segments = [
-    ...new Set(
-      records.map((record) => String(record.SEGMENT ?? "").trim()).filter(Boolean)
-    )
-  ].sort();
+  const filters = getAvailableFilters(records);
 
   return {
     metadata: snapshot.metadata,
@@ -328,8 +404,7 @@ export async function getMeta() {
       targetIncrease: TARGET_INCREASE
     },
     filters: {
-      divisions,
-      segments
+      ...filters
     }
   };
 }
@@ -338,21 +413,13 @@ export async function getDashboard(filters: FilterParams = {}) {
   const { snapshot, records } = await getRemoteSnapshot();
   const filteredSnapshot =
     normalizeFilterValues(filters.divisions).length > 0 ||
-    normalizeFilterValues(filters.segments).length > 0
+    normalizeFilterValues(filters.segments).length > 0 ||
+    normalizeFilterValues(filters.channels).length > 0 ||
+    normalizeFilterValues(filters.fcNames).length > 0 ||
+    normalizeFilterValues(filters.discountTypes).length > 0
       ? await getFilteredSnapshot(filters)
       : snapshot;
-  const divisions = [
-    ...new Set(
-      records
-        .map((record) => String(record.DIVISION_NAME ?? "").trim())
-        .filter(Boolean)
-    )
-  ].sort();
-  const segments = [
-    ...new Set(
-      records.map((record) => String(record.SEGMENT ?? "").trim()).filter(Boolean)
-    )
-  ].sort();
+  const availableFilters = getAvailableFilters(records);
   const latestDay = filteredSnapshot.trend.at(-1)?.day;
   const summary = filters.day
     ? filteredSnapshot.summaryByDay.get(filters.day)
@@ -370,8 +437,7 @@ export async function getDashboard(filters: FilterParams = {}) {
         targetIncrease: TARGET_INCREASE
       },
       filters: {
-        divisions,
-        segments
+        ...availableFilters
       }
     },
     summary:
@@ -440,6 +506,9 @@ export async function getProjects(params: {
   day?: string;
   divisions?: string[];
   segments?: string[];
+  channels?: string[];
+  fcNames?: string[];
+  discountTypes?: string[];
   page?: number;
   pageSize?: number;
 }) {
@@ -449,6 +518,9 @@ export async function getProjects(params: {
     day = "",
     divisions = [],
     segments = [],
+    channels = [],
+    fcNames = [],
+    discountTypes = [],
     page = 1,
     pageSize = 20
   } = params;
@@ -460,10 +532,16 @@ export async function getProjects(params: {
   const ladderSet = new Set(ladders);
   let rows: ProjectRow[];
 
-  const snapshot = await getFilteredSnapshot({ divisions, segments });
+  const snapshot = await getFilteredSnapshot({
+    divisions,
+    segments,
+    channels,
+    fcNames,
+    discountTypes
+  });
   rows = day
     ? snapshot.dailyProjects.filter((row) => row.latestDay === day)
-    : [...snapshot.projects];
+    : [...snapshot.dailyProjects];
 
   if (normalizedSearch) {
     rows = rows.filter((row) => {
@@ -505,7 +583,30 @@ export function formatHandlerError(error: unknown) {
 }
 
 export function warmRemoteSnapshot() {
-  void getRemoteSnapshot().catch(() => {
+  void forceRefreshRemoteSnapshot().catch(() => {
     // Warm-up should never crash the server; request handlers still surface errors.
   });
+}
+
+export function scheduleRemoteSnapshotRefresh() {
+  if (cachePreloadTimer) {
+    return;
+  }
+
+  warmRemoteSnapshot();
+  cachePreloadTimer = setInterval(() => {
+    warmRemoteSnapshot();
+  }, CACHE_PRELOAD_INTERVAL_MS);
+  cachePreloadTimer.unref?.();
+}
+
+export function getCacheStatus() {
+  return {
+    hasCache: Boolean(remoteCache.snapshot && remoteCache.records),
+    fetchedAt: remoteCache.fetchedAt || null,
+    expiresAt: remoteCache.expiresAt || null,
+    cacheTtlMs: MEMORY_CACHE_TTL_MS,
+    preloadIntervalMs: CACHE_PRELOAD_INTERVAL_MS,
+    isRefreshing: Boolean(pendingRemoteSnapshot)
+  };
 }
