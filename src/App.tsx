@@ -966,7 +966,7 @@ export function App() {
       ]
     },
     totalIncrease: {
-      title: "Total increase คืออะไร",
+      title: "Avg increase คืออะไร",
       lines: [
         "ตัวเลขนี้คือราคาเพิ่มเฉลี่ยต่อ B/Q ของวันที่กำลังดู ไม่ใช่ยอดรวมบาทของทุกโครงการ",
         "เริ่มจากคำนวณแต่ละโครงการก่อน: ราคาเพิ่มขึ้น = ราคา NP_AVG ของวันนั้น - ราคา Baseline",
@@ -1002,14 +1002,14 @@ export function App() {
         "คำนวณทีละโครงการ: % Disc ที่ลดลง = (Disc Baseline - Disc วันนั้น) / Disc Baseline x 100",
         "ถ้า Disc วันนั้นไม่ได้ลดลง หรือสูงกว่า Baseline จะนับเป็น 0%",
         "จากนั้นจัดกลุ่มเป็นช่วง 0-2.9%, 3.0-5.9%, 6.0-8.9%, 9.0-11.9%, 12.0-14.9%, และ 15% ขึ้นไป",
-        "สีเทา 'ไม่มี baseline' คือโครงการที่ไม่มี Disc Baseline ให้เปรียบเทียบ"
+        "สีเทา 'ไม่มี baseline' คือโครงการที่มีข้อมูลวันนั้น แต่ไม่มีข้อมูลช่วง 1-24 มี.ค. จึงไม่มี Baseline ให้เปรียบเทียบ"
       ]
     },
     averageTrend: {
       title: "ค่าเฉลี่ยการขึ้นราคารายวัน อ่านยังไง",
       lines: [
         "กราฟเส้นนี้แสดงราคาเพิ่มเฉลี่ยของแต่ละวัน เพื่อดูแนวโน้มว่าราคาเพิ่มขึ้นมากขึ้นหรือลดลง",
-        "แต่ละจุดใช้สูตรเดียวกับ Total increase: SUM(ราคาเพิ่มขึ้น x SUMQ) / SUM(SUMQ)",
+        "แต่ละจุดใช้สูตรเดียวกับ Avg increase: SUM(ราคาเพิ่มขึ้น x SUMQ) / SUM(SUMQ)",
         "ราคาเพิ่มขึ้นของแต่ละโครงการ = ราคา NP_AVG ของวันนั้น - ราคา Baseline",
         "ถ้าราคาวันนั้นต่ำกว่า Baseline จะนับเป็น 0",
         "เมื่อเลือก Division, Segment หรือ DISCOUNT_TYPE กราฟนี้จะคำนวณใหม่เฉพาะกลุ่มที่เลือก"
@@ -1084,7 +1084,7 @@ export function App() {
           <button type="button" className="calcHelpButton" onClick={() => setActiveCalcHelp("totalIncrease")}>
             วิธีคำนวณ
           </button>
-          <span>Total increase</span>
+          <span>Avg increase</span>
           <strong>{formatNumber(summary.avgIncrease)} บาท B/Q</strong>
           <p>คำนวณจากข้อมูล {summaryDateRange}</p>
         </article>
@@ -1094,7 +1094,7 @@ export function App() {
           </button>
           <span>Average to target</span>
           <strong>{formatPercent(targetHitShare)}</strong>
-          <p>สัดส่วนโครงการที่ขึ้นถึง 300 บาท B/C ขึ้นไป {summaryDateRange}</p>
+          <p>สัดส่วนโครงการที่ขึ้นถึง 300 บาท B/Q ขึ้นไป {summaryDateRange}</p>
         </article>
       </section>
 
