@@ -18,13 +18,13 @@ export function formatPercentTick(value: number) {
   return `${Math.round(value)}%`;
 }
 
-export function formatDiscountDropPercent(baselineDisc: number, currentDisc: number) {
+export function formatDiscountDropPoints(baselineDisc: number, currentDisc: number) {
   if (!Number.isFinite(baselineDisc) || baselineDisc <= 0) {
     return "-";
   }
 
-  const dropPercent = Math.max(((baselineDisc - currentDisc) / baselineDisc) * 100, 0);
-  return formatPercent(dropPercent);
+  const dropPoints = Math.max(baselineDisc - currentDisc, 0);
+  return formatNumber(dropPoints);
 }
 
 export function formatBaht(value: number) {

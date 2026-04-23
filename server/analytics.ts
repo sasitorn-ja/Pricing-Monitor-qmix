@@ -206,14 +206,13 @@ function getLadder(increaseAmount: number) {
 type DiscountDropKey = "disc0" | "disc3" | "disc6" | "disc9" | "disc12" | "disc15";
 
 function getDiscountDropBucket(baselineDisc: number, postDisc: number): DiscountDropKey {
-  const dropPercent =
-    baselineDisc > 0 ? Math.max(((baselineDisc - postDisc) / baselineDisc) * 100, 0) : 0;
+  const dropPoints = baselineDisc > 0 ? Math.max(baselineDisc - postDisc, 0) : 0;
 
-  if (dropPercent >= 15) return "disc15";
-  if (dropPercent >= 12) return "disc12";
-  if (dropPercent >= 9) return "disc9";
-  if (dropPercent >= 6) return "disc6";
-  if (dropPercent >= 3) return "disc3";
+  if (dropPoints >= 15) return "disc15";
+  if (dropPoints >= 12) return "disc12";
+  if (dropPoints >= 9) return "disc9";
+  if (dropPoints >= 6) return "disc6";
+  if (dropPoints >= 3) return "disc3";
   return "disc0";
 }
 

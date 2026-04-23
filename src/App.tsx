@@ -29,7 +29,7 @@ import { useDelayedFlag } from "./hooks/useDelayedFlag";
 import { fetchJson } from "./lib/api";
 import {
   formatBaht,
-  formatDiscountDropPercent,
+  formatDiscountDropPoints,
   formatNumber,
   formatPercent,
   formatPercentTick,
@@ -437,6 +437,11 @@ export function App() {
   const [meta, setMeta] = useState<MetaResponse | null>(null);
   const [summary, setSummary] = useState<SummaryResponse | null>(null);
   const [trend, setTrend] = useState<TrendPoint[]>([]);
+  const defaultSummaryRef = useRef<SummaryResponse | null>(null);
+  const defaultTrendRef = useRef<TrendPoint[]>([]);
+  const dashboardRequestIdRef = useRef(0);
+  const projectRequestIdRef = useRef(0);
+  const selectedTrendRequestIdRef = useRef(0);
   const [projectRows, setProjectRows] = useState<ProjectRow[]>([]);
   const [projectTotal, setProjectTotal] = useState(0);
   const [selectedBuckets, setSelectedBuckets] = useState<string[]>([]);
@@ -529,6 +534,8 @@ export function App() {
         setMeta(dashboardResponse.meta);
         setSummary(dashboardResponse.summary);
         setTrend(dashboardResponse.trend);
+        defaultSummaryRef.current = dashboardResponse.summary;
+        defaultTrendRef.current = dashboardResponse.trend;
         setHasLoadedSummary(true);
       } catch (requestError) {
         setError(
@@ -548,15 +555,28 @@ export function App() {
         return;
       }
 
-      if (
-        hasLoadedSummary &&
+      const requestId = ++dashboardRequestIdRef.current;
+
+      const isDefaultDashboardView =
         !selectedDay &&
         selectedDivisions.length === 0 &&
         selectedSegments.length === 0 &&
         selectedChannels.length === 0 &&
         selectedFcNames.length === 0 &&
-        selectedDiscountTypes.length === 0
+        selectedDiscountTypes.length === 0;
+
+      if (
+        hasLoadedSummary &&
+        isDefaultDashboardView
       ) {
+        if (
+          requestId === dashboardRequestIdRef.current &&
+          defaultSummaryRef.current
+        ) {
+          setSummary(defaultSummaryRef.current);
+          setTrend(defaultTrendRef.current);
+          setDashboardLoading(false);
+        }
         return;
       }
 
@@ -575,15 +595,25 @@ export function App() {
           fetchJson<TrendPoint[]>(`/api/trend${suffix}`)
         ]);
 
+        if (requestId !== dashboardRequestIdRef.current) {
+          return;
+        }
+
         setSummary(summaryResponse);
         setTrend(trendResponse);
         setHasLoadedSummary(true);
       } catch (requestError) {
+        if (requestId !== dashboardRequestIdRef.current) {
+          return;
+        }
+
         setError(
           requestError instanceof Error ? requestError.message : "Unknown error"
         );
       } finally {
-        setDashboardLoading(false);
+        if (requestId === dashboardRequestIdRef.current) {
+          setDashboardLoading(false);
+        }
       }
     }
 
@@ -604,6 +634,8 @@ export function App() {
       if (!hasLoadedSummary || !meta) {
         return;
       }
+
+      const requestId = ++projectRequestIdRef.current;
 
       try {
         setProjectLoading(true);
@@ -667,6 +699,10 @@ export function App() {
           );
         }
 
+        if (requestId !== projectRequestIdRef.current) {
+          return;
+        }
+
         setProjectRows(projectResponse.rows);
         setProjectTotal(projectResponse.total);
         setHasLoadedProjects(true);
@@ -679,11 +715,17 @@ export function App() {
           setSelectedSite(projectResponse.rows[0]?.siteNo ?? "");
         }
       } catch (requestError) {
+        if (requestId !== projectRequestIdRef.current) {
+          return;
+        }
+
         setProjectError(
           requestError instanceof Error ? requestError.message : "Unknown error"
         );
       } finally {
-        setProjectLoading(false);
+        if (requestId === projectRequestIdRef.current) {
+          setProjectLoading(false);
+        }
       }
     }
 
@@ -718,9 +760,12 @@ export function App() {
   useEffect(() => {
     async function loadSelectedTrend() {
       if (!selectedSite) {
+        selectedTrendRequestIdRef.current += 1;
         setSelectedTrend([]);
         return;
       }
+
+      const requestId = ++selectedTrendRequestIdRef.current;
 
       try {
         const params = buildFilterQuery();
@@ -729,8 +774,16 @@ export function App() {
           `/api/projects/${encodeURIComponent(selectedSite)}/trend${query ? `?${query}` : ""}`
         );
 
+        if (requestId !== selectedTrendRequestIdRef.current) {
+          return;
+        }
+
         setSelectedTrend(projectTrend);
       } catch (requestError) {
+        if (requestId !== selectedTrendRequestIdRef.current) {
+          return;
+        }
+
         setError(
           requestError instanceof Error ? requestError.message : "Unknown error"
         );
@@ -998,8 +1051,8 @@ export function App() {
     discountDropChart: {
       title: "% สัดส่วน Disc ที่ลดลง อ่านยังไง",
       lines: [
-        "กราฟนี้ดูว่าส่วนลดเฉลี่ยของโครงการลดลงจากช่วง Baseline มากแค่ไหน",
-        "คำนวณทีละโครงการ: % Disc ที่ลดลง = (Disc Baseline - Disc วันนั้น) / Disc Baseline x 100",
+        "กราฟนี้ดูว่าส่วนลดของโครงการลดลงจากช่วง Baseline กี่ %",
+        "คำนวณทีละโครงการ: Discount Drop (%) = Disc Baseline - Disc วันนั้น",
         "ถ้า Disc วันนั้นไม่ได้ลดลง หรือสูงกว่า Baseline จะนับเป็น 0%",
         "จากนั้นจัดกลุ่มเป็นช่วง 0-2.9%, 3.0-5.9%, 6.0-8.9%, 9.0-11.9%, 12.0-14.9%, และ 15% ขึ้นไป",
         "สีเทา 'ไม่มี baseline' คือโครงการที่มีข้อมูลวันนั้น แต่ไม่มีข้อมูลช่วง 1-24 มี.ค. จึงไม่มี Baseline ให้เปรียบเทียบ"
@@ -1283,7 +1336,7 @@ export function App() {
             <div>
               <h2>% สัดส่วน Disc ที่ลดลง</h2>
               <p>
-                เปอร์เซ็นต์นี้คือ Disc ของวันนั้นลดลงจาก Disc ช่วงก่อนปรับกี่ %
+                กราฟนี้แสดงสัดส่วนโครงการที่ Discount ลดลงจาก Baseline กี่ %
                 แล้วแบ่งช่วงลดลงทีละ 3%; สีเทาคือโครงการที่ไม่มีข้อมูลก่อนปรับให้เทียบ
               </p>
             </div>
@@ -1854,7 +1907,7 @@ export function App() {
                   <th>
                     <HeaderWithHint
                       hintKey="baselineDisc"
-                      label="Disc Baseline"
+                      label="Disc Baseline (%)"
                       hint={tableColumnHelp.baselineDisc}
                       activeHint={activeHint}
                       onToggle={(key) =>
@@ -1865,7 +1918,7 @@ export function App() {
                   <th>
                     <HeaderWithHint
                       hintKey="currentDisc"
-                      label="Disc Current"
+                      label="Disc Current (%)"
                       hint={tableColumnHelp.currentDisc}
                       activeHint={activeHint}
                       onToggle={(key) =>
@@ -1876,7 +1929,7 @@ export function App() {
                   <th>
                     <HeaderWithHint
                       hintKey="discount"
-                      label="Discount"
+                      label="Discount Drop (%)"
                       hint={tableColumnHelp.discount}
                       activeHint={activeHint}
                       onToggle={(key) =>
@@ -1923,9 +1976,9 @@ export function App() {
                     <td>{formatNumber(row.baselineNetPrice)}</td>
                     <td>{formatNumber(row.currentNetPrice)}</td>
                     <td>{formatNumber(row.increaseAmount)}</td>
-                    <td>{formatNumber(row.baselineDisc)}</td>
-                    <td>{formatNumber(row.currentDisc)}</td>
-                    <td>{formatDiscountDropPercent(row.baselineDisc, row.currentDisc)}</td>
+                    <td>{formatPercent(row.baselineDisc)}</td>
+                    <td>{formatPercent(row.currentDisc)}</td>
+                    <td>{formatDiscountDropPoints(row.baselineDisc, row.currentDisc)}</td>
                     <td>{row.latestDay}</td>
                   </tr>
                 ))}

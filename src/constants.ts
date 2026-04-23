@@ -61,8 +61,8 @@ export const tableColumnHelp = {
   baseline: "ราคาอ้างอิงก่อนเริ่มติดตาม คำนวณจาก NP_AVG เฉลี่ยถ่วงปริมาณขายช่วง 1-24 มี.ค.",
   current: "ราคา NP_AVG ของวันที่แสดงในแถวนี้ ถ้าไม่ได้เลือกวัน ตารางจะแสดงข้อมูลรายวันทั้งหมด",
   increase: "ราคาที่เพิ่มขึ้น = Current - Baseline ถ้าราคาปัจจุบันต่ำกว่า Baseline จะนับเป็น 0",
-  baselineDisc: "Disc อ้างอิงก่อนเริ่มติดตาม คำนวณจาก DC_AVG เฉลี่ยถ่วงปริมาณขายช่วง 1-24 มี.ค.",
-  currentDisc: "Disc ของวันที่แสดงในแถวนี้ ถ้าไม่ได้เลือกวัน ตารางจะแสดงข้อมูลรายวันทั้งหมด",
-  discount: "เปอร์เซ็นต์ที่ Discount ลดลงจากช่วงก่อนปรับ คำนวณจาก (Disc Baseline - Disc Current) / Disc Baseline x 100",
+  baselineDisc: "Disc Baseline (%) คือส่วนลดอ้างอิงก่อนเริ่มติดตาม คำนวณจาก DC_AVG เฉลี่ยถ่วงปริมาณขายช่วง 1-24 มี.ค.",
+  currentDisc: "Disc Current (%) คือส่วนลดของวันที่แสดงในแถวนี้ ถ้าไม่ได้เลือกวัน ตารางจะแสดงข้อมูลรายวันทั้งหมด",
+  discount: "Discount Drop (%) คือส่วนต่างของส่วนลดแบบตรง ๆ คำนวณจาก Disc Baseline - Disc Current ถ้า Current สูงกว่า Baseline จะนับเป็น 0",
   latestDay: "วันที่ของข้อมูลราคาที่ใช้คำนวณแถวนี้"
 } as const;
