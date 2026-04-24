@@ -3,10 +3,15 @@ import path from "node:path";
 import {
   BASELINE_END,
   BASELINE_START,
-  CAMPAIGN_START,
   TARGET_INCREASE
-} from "./queries.js";
-import { buildAnalytics, type PricingRecord, type ProjectRow } from "./analytics.js";
+} from "../config/pricing.js";
+import { mockPricingRecords } from "../data/mockPricingRecords.js";
+import {
+  buildAnalytics,
+  getAnalyticsConfig,
+  type PricingRecord,
+  type ProjectRow
+} from "../services/analytics/index.js";
 
 type AnalyticsSnapshot = ReturnType<typeof buildAnalytics>;
 
@@ -17,6 +22,8 @@ type FilterParams = {
   fcNames?: string[];
   discountTypes?: string[];
   day?: string;
+  baselineStart?: string;
+  baselineEnd?: string;
 };
 
 type CachedFilteredSnapshot = {
@@ -24,12 +31,6 @@ type CachedFilteredSnapshot = {
   snapshot: AnalyticsSnapshot;
 };
 
-const DEFAULT_REMOTE_FETCH_TIMEOUT_MS = 30_000;
-const parsedRemoteFetchTimeoutMs = Number(process.env.DATAOCEAN_TIMEOUT_MS ?? "");
-const REMOTE_FETCH_TIMEOUT_MS =
-  Number.isFinite(parsedRemoteFetchTimeoutMs) && parsedRemoteFetchTimeoutMs > 0
-    ? parsedRemoteFetchTimeoutMs
-    : DEFAULT_REMOTE_FETCH_TIMEOUT_MS;
 const DEFAULT_MEMORY_CACHE_TTL_MS = 24 * 60 * 60 * 1000;
 const parsedMemoryCacheTtlMs = Number(process.env.DATA_CACHE_TTL_MS ?? "");
 const MEMORY_CACHE_TTL_MS =
@@ -42,8 +43,6 @@ const CACHE_PRELOAD_INTERVAL_MS =
   Number.isFinite(parsedCachePreloadIntervalMs) && parsedCachePreloadIntervalMs > 0
     ? parsedCachePreloadIntervalMs
     : DEFAULT_CACHE_PRELOAD_INTERVAL_MS;
-const REMOTE_FETCH_MAX_RETRIES = 2;
-const RETRY_BACKOFF_MS = 1_000;
 const PERSISTED_CACHE_DIR = process.env.VERCEL
   ? "/tmp"
   : path.join(process.cwd(), ".cache");
@@ -74,48 +73,8 @@ function wait(ms: number) {
 }
 
 async function fetchRemoteRecords() {
-  const apiUrl = process.env.DATAOCEAN_API_URL ?? "";
-  const apiToken = process.env.DATAOCEAN_API_TOKEN ?? "";
-
-  if (!apiUrl || !apiToken) {
-    throw new Error(
-      "Missing DATAOCEAN_API_URL or DATAOCEAN_API_TOKEN for remote analytics mode."
-    );
-  }
-
-  let lastError: unknown = null;
-
-  for (let attempt = 1; attempt <= REMOTE_FETCH_MAX_RETRIES; attempt += 1) {
-    try {
-      const response = await fetch(apiUrl, {
-        headers: {
-          Authorization: `Bearer ${apiToken}`,
-          Accept: "application/json"
-        },
-        signal: AbortSignal.timeout(REMOTE_FETCH_TIMEOUT_MS)
-      });
-
-      if (!response.ok) {
-        throw new Error(`Remote API request failed with status ${response.status}`);
-      }
-
-      const body = (await response.json()) as unknown;
-
-      if (!Array.isArray(body)) {
-        throw new Error("Remote API response is not an array");
-      }
-
-      return body as PricingRecord[];
-    } catch (error) {
-      lastError = error;
-
-      if (attempt < REMOTE_FETCH_MAX_RETRIES) {
-        await wait(RETRY_BACKOFF_MS * attempt);
-      }
-    }
-  }
-
-  throw lastError instanceof Error ? lastError : new Error("Unknown remote fetch error");
+  await wait(80);
+  return mockPricingRecords;
 }
 
 async function persistRemoteRecords(records: PricingRecord[]) {
@@ -129,8 +88,15 @@ async function persistRemoteRecords(records: PricingRecord[]) {
   );
 }
 
+function buildSnapshot(records: PricingRecord[], filters: Pick<FilterParams, "baselineStart" | "baselineEnd"> = {}) {
+  return buildAnalytics(records, {
+    baselineStart: filters.baselineStart,
+    baselineEnd: filters.baselineEnd
+  });
+}
+
 function applyRemoteCache(records: PricingRecord[], fetchedAt = Date.now()) {
-  const snapshot = buildAnalytics(records);
+  const snapshot = buildSnapshot(records);
   filteredSnapshotCache.clear();
   remoteCache.records = records;
   remoteCache.snapshot = snapshot;
@@ -207,35 +173,10 @@ export async function forceRefreshRemoteSnapshot() {
 
 function toReadableError(error: unknown) {
   if (error instanceof Error) {
-    const message = error.message;
-    const cause =
-      typeof error.cause === "object" && error.cause !== null
-        ? String((error.cause as { code?: string; message?: string }).code ?? "") +
-          " " +
-          String((error.cause as { code?: string; message?: string }).message ?? "")
-        : "";
-    const combined = `${message} ${cause}`;
-
-    if (combined.includes("ENOTFOUND")) {
-      return "Cannot resolve DataOcean host. Check internet/DNS or corporate VPN access.";
-    }
-
-    if (combined.includes("401")) {
-      return "DataOcean token was rejected. Check DATAOCEAN_API_TOKEN.";
-    }
-
-    if (combined.includes("timed out") || combined.includes("TimeoutError")) {
-      return `DataOcean did not respond within ${REMOTE_FETCH_TIMEOUT_MS / 1000} seconds.`;
-    }
-
-    if (combined.includes("fetch failed")) {
-      return "Cannot reach DataOcean API. Check internet connection, VPN, or API URL.";
-    }
-
-    return message;
+    return error.message;
   }
 
-  return "Unknown remote data error";
+  return "Unknown demo data error";
 }
 
 async function getRemoteSnapshot() {
@@ -323,8 +264,20 @@ function buildFilterCacheKey(filters: FilterParams) {
   const channels = normalizeFilterValues(filters.channels).sort();
   const fcNames = normalizeFilterValues(filters.fcNames).sort();
   const discountTypes = normalizeFilterValues(filters.discountTypes).sort();
+  const analyticsConfig = getAnalyticsConfig({
+    baselineStart: filters.baselineStart,
+    baselineEnd: filters.baselineEnd
+  });
 
-  return JSON.stringify({ divisions, segments, channels, fcNames, discountTypes });
+  return JSON.stringify({
+    divisions,
+    segments,
+    channels,
+    fcNames,
+    discountTypes,
+    baselineStart: analyticsConfig.baselineStart,
+    baselineEnd: analyticsConfig.baselineEnd
+  });
 }
 
 function getAvailableFilters(records: PricingRecord[]) {
@@ -371,6 +324,12 @@ async function getFilteredSnapshot(filters: FilterParams = {}) {
   const { snapshot, records } = await getRemoteSnapshot();
   const cacheKey = buildFilterCacheKey(filters);
   const cached = filteredSnapshotCache.get(cacheKey);
+  const analyticsConfig = getAnalyticsConfig({
+    baselineStart: filters.baselineStart,
+    baselineEnd: filters.baselineEnd
+  });
+  const isDefaultBaseline =
+    analyticsConfig.baselineStart === BASELINE_START && analyticsConfig.baselineEnd === BASELINE_END;
 
   if (cached && cached.expiresAt > Date.now()) {
     return cached.snapshot;
@@ -378,11 +337,11 @@ async function getFilteredSnapshot(filters: FilterParams = {}) {
 
   const filteredRecords = filterRecords(records, filters);
 
-  if (filteredRecords === records) {
+  if (filteredRecords === records && isDefaultBaseline) {
     return snapshot;
   }
 
-  const filteredSnapshot = buildAnalytics(filteredRecords);
+  const filteredSnapshot = buildSnapshot(filteredRecords, analyticsConfig);
   filteredSnapshotCache.set(cacheKey, {
     snapshot: filteredSnapshot,
     expiresAt: remoteCache.expiresAt
@@ -394,13 +353,14 @@ async function getFilteredSnapshot(filters: FilterParams = {}) {
 export async function getMeta() {
   const { snapshot, records } = await getRemoteSnapshot();
   const filters = getAvailableFilters(records);
+  const analyticsConfig = getAnalyticsConfig();
 
   return {
     metadata: snapshot.metadata,
     config: {
-      baselineStart: BASELINE_START,
-      baselineEnd: BASELINE_END,
-      campaignStart: CAMPAIGN_START,
+      baselineStart: analyticsConfig.baselineStart,
+      baselineEnd: analyticsConfig.baselineEnd,
+      campaignStart: analyticsConfig.campaignStart,
       targetIncrease: TARGET_INCREASE
     },
     filters: {
@@ -411,12 +371,19 @@ export async function getMeta() {
 
 export async function getDashboard(filters: FilterParams = {}) {
   const { snapshot, records } = await getRemoteSnapshot();
+  const analyticsConfig = getAnalyticsConfig({
+    baselineStart: filters.baselineStart,
+    baselineEnd: filters.baselineEnd
+  });
+  const isDefaultBaseline =
+    analyticsConfig.baselineStart === BASELINE_START && analyticsConfig.baselineEnd === BASELINE_END;
   const filteredSnapshot =
     normalizeFilterValues(filters.divisions).length > 0 ||
     normalizeFilterValues(filters.segments).length > 0 ||
     normalizeFilterValues(filters.channels).length > 0 ||
     normalizeFilterValues(filters.fcNames).length > 0 ||
-    normalizeFilterValues(filters.discountTypes).length > 0
+    normalizeFilterValues(filters.discountTypes).length > 0 ||
+    !isDefaultBaseline
       ? await getFilteredSnapshot(filters)
       : snapshot;
   const availableFilters = getAvailableFilters(records);
@@ -431,9 +398,9 @@ export async function getDashboard(filters: FilterParams = {}) {
     meta: {
       metadata: filteredSnapshot.metadata,
       config: {
-        baselineStart: BASELINE_START,
-        baselineEnd: BASELINE_END,
-        campaignStart: CAMPAIGN_START,
+        baselineStart: analyticsConfig.baselineStart,
+        baselineEnd: analyticsConfig.baselineEnd,
+        campaignStart: analyticsConfig.campaignStart,
         targetIncrease: TARGET_INCREASE
       },
       filters: {
@@ -509,6 +476,8 @@ export async function getProjects(params: {
   channels?: string[];
   fcNames?: string[];
   discountTypes?: string[];
+  baselineStart?: string;
+  baselineEnd?: string;
   page?: number;
   pageSize?: number;
 }) {
@@ -521,6 +490,8 @@ export async function getProjects(params: {
     channels = [],
     fcNames = [],
     discountTypes = [],
+    baselineStart = "",
+    baselineEnd = "",
     page = 1,
     pageSize = 20
   } = params;
@@ -537,7 +508,9 @@ export async function getProjects(params: {
     segments,
     channels,
     fcNames,
-    discountTypes
+    discountTypes,
+    baselineStart,
+    baselineEnd
   });
   rows = day
     ? snapshot.dailyProjects.filter((row) => row.latestDay === day)
@@ -607,6 +580,7 @@ export function getCacheStatus() {
     expiresAt: remoteCache.expiresAt || null,
     cacheTtlMs: MEMORY_CACHE_TTL_MS,
     preloadIntervalMs: CACHE_PRELOAD_INTERVAL_MS,
-    isRefreshing: Boolean(pendingRemoteSnapshot)
+    isRefreshing: Boolean(pendingRemoteSnapshot),
+    source: "demo-mock-data"
   };
 }

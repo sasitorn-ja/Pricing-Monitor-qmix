@@ -1,9 +1,9 @@
 import {
   formatHandlerError,
   getProjectTrend
-} from "../../../server/api-handlers.js";
-import type { ApiRequest, ApiResponse } from "../../_shared.js";
-import { readQueryValue, sendJson } from "../../_shared.js";
+} from "../../../server/handlers/pricing.js";
+import type { ApiRequest, ApiResponse } from "../../shared/http.js";
+import { readQueryValue, sendJson } from "../../shared/http.js";
 
 export default async function handler(req: ApiRequest, res: ApiResponse) {
   const siteNo =
