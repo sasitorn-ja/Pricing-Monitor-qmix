@@ -27,7 +27,9 @@ export default async function handler(req: ApiRequest, res: ApiResponse) {
           .split(",")
           .map((value) => value.trim())
           .filter(Boolean),
-        day: readQueryValue(req.query, "day")
+        day: readQueryValue(req.query, "day"),
+        baselineStart: readQueryValue(req.query, "baselineStart"),
+        baselineEnd: readQueryValue(req.query, "baselineEnd")
       })
     );
   } catch (error) {

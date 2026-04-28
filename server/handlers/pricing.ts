@@ -5,7 +5,6 @@ import {
   BASELINE_START,
   TARGET_INCREASE
 } from "../config/pricing.js";
-import { mockPricingRecords } from "../data/mockPricingRecords.js";
 import {
   buildAnalytics,
   getAnalyticsConfig,
@@ -31,6 +30,12 @@ type CachedFilteredSnapshot = {
   snapshot: AnalyticsSnapshot;
 };
 
+const DEFAULT_REMOTE_FETCH_TIMEOUT_MS = 30_000;
+const parsedRemoteFetchTimeoutMs = Number(process.env.DATAOCEAN_TIMEOUT_MS ?? "");
+const REMOTE_FETCH_TIMEOUT_MS =
+  Number.isFinite(parsedRemoteFetchTimeoutMs) && parsedRemoteFetchTimeoutMs > 0
+    ? parsedRemoteFetchTimeoutMs
+    : DEFAULT_REMOTE_FETCH_TIMEOUT_MS;
 const DEFAULT_MEMORY_CACHE_TTL_MS = 24 * 60 * 60 * 1000;
 const parsedMemoryCacheTtlMs = Number(process.env.DATA_CACHE_TTL_MS ?? "");
 const MEMORY_CACHE_TTL_MS =
@@ -43,6 +48,8 @@ const CACHE_PRELOAD_INTERVAL_MS =
   Number.isFinite(parsedCachePreloadIntervalMs) && parsedCachePreloadIntervalMs > 0
     ? parsedCachePreloadIntervalMs
     : DEFAULT_CACHE_PRELOAD_INTERVAL_MS;
+const REMOTE_FETCH_MAX_RETRIES = 2;
+const RETRY_BACKOFF_MS = 1_000;
 const PERSISTED_CACHE_DIR = process.env.VERCEL
   ? "/tmp"
   : path.join(process.cwd(), ".cache");
@@ -73,8 +80,48 @@ function wait(ms: number) {
 }
 
 async function fetchRemoteRecords() {
-  await wait(80);
-  return mockPricingRecords;
+  const apiUrl = process.env.DATAOCEAN_API_URL ?? "";
+  const apiToken = process.env.DATAOCEAN_API_TOKEN ?? "";
+
+  if (!apiUrl || !apiToken) {
+    throw new Error(
+      "Missing DATAOCEAN_API_URL or DATAOCEAN_API_TOKEN for remote analytics mode."
+    );
+  }
+
+  let lastError: unknown = null;
+
+  for (let attempt = 1; attempt <= REMOTE_FETCH_MAX_RETRIES; attempt += 1) {
+    try {
+      const response = await fetch(apiUrl, {
+        headers: {
+          Authorization: `Bearer ${apiToken}`,
+          Accept: "application/json"
+        },
+        signal: AbortSignal.timeout(REMOTE_FETCH_TIMEOUT_MS)
+      });
+
+      if (!response.ok) {
+        throw new Error(`Remote API request failed with status ${response.status}`);
+      }
+
+      const body = (await response.json()) as unknown;
+
+      if (!Array.isArray(body)) {
+        throw new Error("Remote API response is not an array");
+      }
+
+      return body as PricingRecord[];
+    } catch (error) {
+      lastError = error;
+
+      if (attempt < REMOTE_FETCH_MAX_RETRIES) {
+        await wait(RETRY_BACKOFF_MS * attempt);
+      }
+    }
+  }
+
+  throw lastError instanceof Error ? lastError : new Error("Unknown remote fetch error");
 }
 
 async function persistRemoteRecords(records: PricingRecord[]) {
@@ -173,10 +220,35 @@ export async function forceRefreshRemoteSnapshot() {
 
 function toReadableError(error: unknown) {
   if (error instanceof Error) {
-    return error.message;
+    const message = error.message;
+    const cause =
+      typeof error.cause === "object" && error.cause !== null
+        ? String((error.cause as { code?: string; message?: string }).code ?? "") +
+          " " +
+          String((error.cause as { code?: string; message?: string }).message ?? "")
+        : "";
+    const combined = `${message} ${cause}`;
+
+    if (combined.includes("ENOTFOUND")) {
+      return "Cannot resolve DataOcean host. Check internet/DNS or corporate VPN access.";
+    }
+
+    if (combined.includes("401")) {
+      return "DataOcean token was rejected. Check DATAOCEAN_API_TOKEN.";
+    }
+
+    if (combined.includes("timed out") || combined.includes("TimeoutError")) {
+      return `DataOcean did not respond within ${REMOTE_FETCH_TIMEOUT_MS / 1000} seconds.`;
+    }
+
+    if (combined.includes("fetch failed")) {
+      return "Cannot reach DataOcean API. Check internet connection, VPN, or API URL.";
+    }
+
+    return message;
   }
 
-  return "Unknown demo data error";
+  return "Unknown remote data error";
 }
 
 async function getRemoteSnapshot() {
@@ -237,22 +309,23 @@ function filterRecords(records: PricingRecord[], filters: FilterParams) {
   }
 
   return records.filter((record) => {
-    const matchesDivision =
-      divisions.size === 0 || divisions.has(String(record.DIVISION_NAME ?? ""));
+    const divisionName = String(record.DIVISION_NAME ?? "");
+    const fcName = String(record.FC_NAME ?? "");
+    const matchesDivisionOrFc =
+      (divisions.size === 0 && fcNames.size === 0) ||
+      divisions.has(divisionName) ||
+      fcNames.has(fcName);
     const matchesSegment =
       segments.size === 0 || segments.has(String(record.SEGMENT ?? ""));
     const matchesChannel =
       channels.size === 0 || channels.has(String(record.CHANNEL ?? ""));
-    const matchesFcName =
-      fcNames.size === 0 || fcNames.has(String(record.FC_NAME ?? ""));
     const matchesDiscountType =
       discountTypes.size === 0 || discountTypes.has(String(record.DISCOUNT_TYPE ?? ""));
 
     return (
-      matchesDivision &&
+      matchesDivisionOrFc &&
       matchesSegment &&
       matchesChannel &&
-      matchesFcName &&
       matchesDiscountType
     );
   });

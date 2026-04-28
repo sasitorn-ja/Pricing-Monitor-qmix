@@ -33,12 +33,30 @@ import type {
 import { buildDashboardFilterQuery } from "./utils/filters";
 import { formatNumber, formatSummaryDateRange, formatThaiDateShort, getPaginationItems } from "./utils/format";
 import { useDelayedFlag } from "../../hooks/useDelayedFlag";
-import { fetchJson } from "../../services/api/fetchJson";
+import { fetchJson, isAbortError } from "../../services/api/fetchJson";
 
 type PriceTrackingPageProps = {
   themeMode: "dark" | "light";
   onToggleTheme: () => void;
 };
+
+const qmixDivisionAliases = [
+  "QMix Bangkok",
+  "QMix Central",
+  "QMix East",
+  "QMix North",
+  "QMix Northeast",
+  "QMix South"
+];
+
+function getDashboardDivisions(availableDivisions: string[]) {
+  const aliases = new Set(qmixDivisionAliases.map((value) => value.toUpperCase()));
+  return availableDivisions.filter((division) => aliases.has(division.toUpperCase()));
+}
+
+function areSameValues(left: string[], right: string[]) {
+  return left.length === right.length && left.every((value) => right.includes(value));
+}
 
 export function PriceTrackingPage({ themeMode, onToggleTheme }: PriceTrackingPageProps) {
   const [meta, setMeta] = useState<MetaResponse | null>(null);
@@ -82,10 +100,19 @@ export function PriceTrackingPage({ themeMode, onToggleTheme }: PriceTrackingPag
   const [projectError, setProjectError] = useState("");
   const showDashboardSlowNotice = useDelayedFlag(metaLoading || dashboardLoading, 1400);
   const showProjectSlowNotice = useDelayedFlag(projectLoading, 1400);
+  const dashboardDefaultDivisions = useMemo(
+    () => getDashboardDivisions(meta?.filters?.divisions ?? []),
+    [meta]
+  );
 
   const buildFilterQuery = () =>
     buildDashboardFilterQuery({
-      divisions: selectedDivisions,
+      divisions:
+        selectedDivisions.length > 0 || selectedFcNames.length > 0
+          ? selectedDivisions
+          : dashboardDefaultDivisions.length > 0
+            ? ["__none__"]
+            : [],
       segments: selectedSegments,
       channels: selectedChannels,
       fcNames: selectedFcNames,
@@ -101,13 +128,75 @@ export function PriceTrackingPage({ themeMode, onToggleTheme }: PriceTrackingPag
   };
 
   const clearDivisions = () => {
-    setSelectedDivisions([]);
+    setSelectedDivisions(dashboardDefaultDivisions);
     setSelectedFcNames([]);
   };
 
-  const toggleDivision = (value: string) => {
-    toggleValue(value, setSelectedDivisions);
+  const clearFcNames = () => {
     setSelectedFcNames([]);
+    setSelectedDivisions((currentDivisions) =>
+      currentDivisions.length > 0 ? currentDivisions : dashboardDefaultDivisions
+    );
+  };
+
+  const toggleDivision = (value: string) => {
+    if (!dashboardDefaultDivisions.includes(value)) {
+      return;
+    }
+
+    const fcNamesInDivision = new Set(meta?.filters?.fcNamesByDivision?.[value] ?? []);
+    setSelectedFcNames((currentFcNames) =>
+      currentFcNames.filter((fcName) => !fcNamesInDivision.has(fcName))
+    );
+    setSelectedDivisions((currentDivisions) => {
+      const hasSelectedEveryDivision = areSameValues(currentDivisions, dashboardDefaultDivisions);
+
+      if (hasSelectedEveryDivision) {
+        return [value];
+      }
+
+      return currentDivisions.includes(value)
+        ? currentDivisions.filter((division) => division !== value)
+        : [...currentDivisions, value];
+    });
+  };
+
+  const toggleFcName = (value: string) => {
+    const division = dashboardDefaultDivisions.find((currentDivision) =>
+      (meta?.filters?.fcNamesByDivision?.[currentDivision] ?? []).includes(value)
+    );
+
+    if (!division) {
+      return;
+    }
+
+    setSelectedFcNames((currentFcNames) => {
+      const isSelecting = !currentFcNames.includes(value);
+      const nextFcNames = isSelecting
+        ? [...currentFcNames, value]
+        : currentFcNames.filter((currentValue) => currentValue !== value);
+
+      setSelectedDivisions((currentDivisions) => {
+        const hasSelectedEveryDivision = areSameValues(currentDivisions, dashboardDefaultDivisions);
+        let nextDivisions = currentDivisions;
+
+        if (isSelecting) {
+          if (hasSelectedEveryDivision) {
+            nextDivisions = [];
+          } else if (currentDivisions.includes(division)) {
+            nextDivisions = currentDivisions.filter((currentValue) => currentValue !== division);
+          }
+        }
+
+        if (nextFcNames.length === 0 && nextDivisions.length === 0) {
+          return dashboardDefaultDivisions;
+        }
+
+        return nextDivisions;
+      });
+
+      return nextFcNames;
+    });
   };
 
   const clearSharedFilters = () => {
@@ -135,13 +224,37 @@ export function PriceTrackingPage({ themeMode, onToggleTheme }: PriceTrackingPag
   }, [search]);
 
   useEffect(() => {
+    const controller = new AbortController();
+
     async function loadInitialDashboard() {
       try {
         setMetaLoading(true);
         setError("");
-        const dashboardResponse = await fetchJson<DashboardResponse>("/api/dashboard");
+        const initialParams = new URLSearchParams({
+          divisions: qmixDivisionAliases.join(",")
+        });
+        let dashboardResponse = await fetchJson<DashboardResponse>(
+          `/api/dashboard?${initialParams.toString()}`,
+          { signal: controller.signal }
+        );
+        let defaultDivisions = getDashboardDivisions(
+          dashboardResponse.meta.filters?.divisions ?? []
+        );
+
+        if (defaultDivisions.length === 0 && dashboardResponse.summary.comparableSites === 0) {
+          dashboardResponse = await fetchJson<DashboardResponse>("/api/dashboard", {
+            signal: controller.signal
+          });
+          defaultDivisions = [];
+        }
+
+        if (controller.signal.aborted) {
+          return;
+        }
+
         setMeta(dashboardResponse.meta);
         defaultMetaRef.current = dashboardResponse.meta;
+        setSelectedDivisions(defaultDivisions);
         setBaselineStart(dashboardResponse.meta.config.baselineStart);
         setBaselineEnd(dashboardResponse.meta.config.baselineEnd);
         defaultBaselineStartRef.current = dashboardResponse.meta.config.baselineStart;
@@ -152,13 +265,21 @@ export function PriceTrackingPage({ themeMode, onToggleTheme }: PriceTrackingPag
         defaultTrendRef.current = dashboardResponse.trend;
         setHasLoadedSummary(true);
       } catch (requestError) {
+        if (controller.signal.aborted || isAbortError(requestError)) {
+          return;
+        }
+
         setError(requestError instanceof Error ? requestError.message : "Unknown error");
       } finally {
-        setMetaLoading(false);
+        if (!controller.signal.aborted) {
+          setMetaLoading(false);
+        }
       }
     }
 
     void loadInitialDashboard();
+
+    return () => controller.abort();
   }, []);
 
   useEffect(() => {
@@ -173,7 +294,7 @@ export function PriceTrackingPage({ themeMode, onToggleTheme }: PriceTrackingPag
         baselineEnd === defaultBaselineEndRef.current;
       const isDefaultDashboardView =
         !selectedDay &&
-        selectedDivisions.length === 0 &&
+        areSameValues(selectedDivisions, dashboardDefaultDivisions) &&
         selectedSegments.length === 0 &&
         selectedChannels.length === 0 &&
         selectedFcNames.length === 0 &&
@@ -249,7 +370,8 @@ export function PriceTrackingPage({ themeMode, onToggleTheme }: PriceTrackingPag
     selectedSegments,
     selectedChannels,
     selectedFcNames,
-    selectedDiscountTypes
+    selectedDiscountTypes,
+    dashboardDefaultDivisions
   ]);
 
   useEffect(() => {
@@ -455,7 +577,10 @@ export function PriceTrackingPage({ themeMode, onToggleTheme }: PriceTrackingPag
     [postCampaignTrendData]
   );
 
-  const availableDivisions = meta?.filters?.divisions ?? [];
+  const availableDivisions =
+    dashboardDefaultDivisions.length > 0
+      ? dashboardDefaultDivisions
+      : (meta?.filters?.divisions ?? []);
   const availableSegments = meta?.filters?.segments ?? [];
   const availableChannels = meta?.filters?.channels ?? [];
   const fcNamesByDivision = meta?.filters?.fcNamesByDivision ?? {};
@@ -536,8 +661,8 @@ export function PriceTrackingPage({ themeMode, onToggleTheme }: PriceTrackingPag
       onResetSharedFilters={clearSharedFilters}
       onToggleDivision={toggleDivision}
       onClearDivisions={clearDivisions}
-      onToggleFcName={(value) => toggleValue(value, setSelectedFcNames)}
-      onClearFcNames={() => setSelectedFcNames([])}
+      onToggleFcName={toggleFcName}
+      onClearFcNames={clearFcNames}
       onToggleSegment={(value) => toggleValue(value, setSelectedSegments)}
       onClearSegments={() => setSelectedSegments([])}
       onToggleChannel={(value) => toggleValue(value, setSelectedChannels)}

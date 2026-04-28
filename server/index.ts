@@ -208,7 +208,7 @@ app.get("/{*splat}", (req, res) => {
 });
 
 const server = app.listen(port, () => {
-  console.log(`Pricing Monitor qmix demo API listening on http://localhost:${port}`);
+  console.log(`Pricing Monitor qmix API listening on http://localhost:${port}`);
   scheduleRemoteSnapshotRefresh();
 });
 

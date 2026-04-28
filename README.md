@@ -1,11 +1,6 @@
 # Pricing Monitor qmix
 
-Dashboard สำหรับวิเคราะห์ว่าโครงการไหนยังขึ้นราคาไม่ถึงเป้า `300 บาท` โดยใช้ `NP_AVG` เป็น `net price`
-
-โปรเจกต์เวอร์ชันนี้ตั้งค่าให้ใช้ `mock data` ภายในทั้งหมดสำหรับ demo และการนำเสนอเท่านั้น
-- ไม่มีการเรียก API จริง
-- ไม่ต้องใช้ token หรือเชื่อมต่อระบบภายนอก
-- ตัวกรอง, กราฟ, และตารางยังทำงานจากข้อมูลจำลองที่สร้างไว้ให้ดูสมจริง
+Dashboard สำหรับติดตามการขึ้นราคา `QMIX` โดยใช้ `NP_AVG` เป็น `net price` และดึงข้อมูลสดจาก DataOcean API แบบเดียวกับโปรเจค `Pricing Monitor`
 
 ## Logic ที่ใช้
 
@@ -37,16 +32,18 @@ Backend API จะอยู่ที่ `http://localhost:8788`
 
 ## Data Source
 
-ข้อมูลที่แสดงทั้งหมดถูก generate จากไฟล์ mock ภายในโปรเจกต์ที่ [server/data/mockPricingRecords.ts](/Users/sasitorn/Pricing%20Monitor%20qmix/server/data/mockPricingRecords.ts)
+ตั้งค่า DataOcean API ใน `.env`
 
-ถ้าต้องการเปลี่ยนเนื้อหา demo สามารถปรับได้ที่:
-- รายชื่อโครงการ, division, segment, channel
-- baseline price, discount, volume
-- แนวโน้มการขึ้นราคาหลัง campaign
-- โครงการที่มีและไม่มี baseline
+```bash
+DATAOCEAN_API_URL=...
+DATAOCEAN_API_TOKEN=...
+```
+
+ตัว dashboard จะเปิดมาใน scope ของ `QMIX` โดยอัตโนมัติ และยังสามารถใช้ filter ภายใน dashboard เพื่อลงลึกตาม division, FC, segment, channel และ discount type ได้
 
 ## Deploy
 
-รองรับ local และ Vercel ได้โดยไม่ต้องตั้งค่า environment สำหรับ API จริง
+รองรับ local และ Vercel โดยใช้ environment เดียวกับโปรเจค `Pricing Monitor`
 - API จะถูกรันผ่าน path `/api/*`
-- ระบบจะ cache snapshot ของข้อมูล demo ไว้เพื่อลดเวลาคำนวณ
+- ระบบจะ cache snapshot ของข้อมูลจาก DataOcean ไว้เพื่อลดเวลาคำนวณ
+- รองรับ cache refresh ผ่าน `/api/cache/refresh`
