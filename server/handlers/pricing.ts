@@ -30,6 +30,15 @@ type CachedFilteredSnapshot = {
   snapshot: AnalyticsSnapshot;
 };
 
+const QMIX_DIVISION_ALLOWLIST = new Set([
+  "QMix Bangkok",
+  "QMix Central",
+  "QMix East",
+  "QMix North",
+  "QMix Northeast",
+  "QMix South"
+]);
+
 const DEFAULT_REMOTE_FETCH_TIMEOUT_MS = 30_000;
 const parsedRemoteFetchTimeoutMs = Number(process.env.DATAOCEAN_TIMEOUT_MS ?? "");
 const REMOTE_FETCH_TIMEOUT_MS =
@@ -291,6 +300,14 @@ function normalizeFilterValues(values: string[] = []) {
     .filter(Boolean);
 }
 
+function isAllowedDivision(divisionName: string) {
+  return QMIX_DIVISION_ALLOWLIST.has(divisionName.trim());
+}
+
+function getScopedRecords(records: PricingRecord[]) {
+  return records.filter((record) => isAllowedDivision(String(record.DIVISION_NAME ?? "")));
+}
+
 function filterRecords(records: PricingRecord[], filters: FilterParams) {
   const divisions = new Set(normalizeFilterValues(filters.divisions));
   const segments = new Set(normalizeFilterValues(filters.segments));
@@ -395,6 +412,7 @@ function getAvailableFilters(records: PricingRecord[]) {
 
 async function getFilteredSnapshot(filters: FilterParams = {}) {
   const { snapshot, records } = await getRemoteSnapshot();
+  const scopedRecords = getScopedRecords(records);
   const cacheKey = buildFilterCacheKey(filters);
   const cached = filteredSnapshotCache.get(cacheKey);
   const analyticsConfig = getAnalyticsConfig({
@@ -408,10 +426,19 @@ async function getFilteredSnapshot(filters: FilterParams = {}) {
     return cached.snapshot;
   }
 
-  const filteredRecords = filterRecords(records, filters);
+  const filteredRecords = filterRecords(scopedRecords, filters);
 
-  if (filteredRecords === records && isDefaultBaseline) {
-    return snapshot;
+  if (filteredRecords === scopedRecords && isDefaultBaseline) {
+    if (scopedRecords === records) {
+      return snapshot;
+    }
+
+    const scopedSnapshot = buildSnapshot(scopedRecords, analyticsConfig);
+    filteredSnapshotCache.set(cacheKey, {
+      snapshot: scopedSnapshot,
+      expiresAt: remoteCache.expiresAt
+    });
+    return scopedSnapshot;
   }
 
   const filteredSnapshot = buildSnapshot(filteredRecords, analyticsConfig);
@@ -424,12 +451,14 @@ async function getFilteredSnapshot(filters: FilterParams = {}) {
 }
 
 export async function getMeta() {
-  const { snapshot, records } = await getRemoteSnapshot();
-  const filters = getAvailableFilters(records);
+  const scopedSnapshot = await getFilteredSnapshot();
+  const { records } = await getRemoteSnapshot();
+  const scopedRecords = getScopedRecords(records);
+  const filters = getAvailableFilters(scopedRecords);
   const analyticsConfig = getAnalyticsConfig();
 
   return {
-    metadata: snapshot.metadata,
+    metadata: scopedSnapshot.metadata,
     config: {
       baselineStart: analyticsConfig.baselineStart,
       baselineEnd: analyticsConfig.baselineEnd,
@@ -443,7 +472,8 @@ export async function getMeta() {
 }
 
 export async function getDashboard(filters: FilterParams = {}) {
-  const { snapshot, records } = await getRemoteSnapshot();
+  const { records } = await getRemoteSnapshot();
+  const scopedRecords = getScopedRecords(records);
   const analyticsConfig = getAnalyticsConfig({
     baselineStart: filters.baselineStart,
     baselineEnd: filters.baselineEnd
@@ -458,8 +488,8 @@ export async function getDashboard(filters: FilterParams = {}) {
     normalizeFilterValues(filters.discountTypes).length > 0 ||
     !isDefaultBaseline
       ? await getFilteredSnapshot(filters)
-      : snapshot;
-  const availableFilters = getAvailableFilters(records);
+      : await getFilteredSnapshot();
+  const availableFilters = getAvailableFilters(scopedRecords);
   const latestDay = filteredSnapshot.trend.at(-1)?.day;
   const summary = filters.day
     ? filteredSnapshot.summaryByDay.get(filters.day)
